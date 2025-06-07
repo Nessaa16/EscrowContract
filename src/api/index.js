@@ -1,0 +1,61 @@
+const express = require('express');
+const mongoose = require('mongoose');
+const serverless = require('serverless-http');
+const cors = require('cors');
+require('dotenv').config();
+const PinataSDK = require('@pinata/sdk'); // Import PinataSDK 
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const Escrow = require('../../../models/escrow');
+
+const pinata = new PinataSDK({
+    pinataJwt: process.env.VITE_JWT,
+    pinataGateway: process.env.VITE_GATEWAY
+});
+
+// Hanya connect jika belum terhubung
+if (mongoose.connection.readyState === 0) {
+  mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log('MongoDB connected'))
+    .catch((err) => console.error('MongoDB error:', err));
+}
+
+app.get('/', async (req, res) => {
+  try {
+    const escrows = await Escrow.find();
+    res.json(escrows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch data' });
+  }
+});
+
+app.post('/upload-json-to-pinata', async (req, res) => {
+    try {
+        const { jsonContent } = req.body;
+        if (!jsonContent) {
+            return res.status(400).json({ error: 'Missing jsonContent in request body' });
+        }
+
+        const options = {
+            pinataMetadata: {
+                name: 'EscrowMetadata', // Nama metadata yang akan digunakan di Pinata
+            },
+            pinataOptions: {
+                cidVersion: 0,
+            },
+        };
+
+        const result = await pinata.pinJSONToIPFS(jsonContent, options);
+        res.status(200).json(result);
+    } catch (error) {
+        console.error('Error uploading JSON to Pinata:', error);
+        res.status(500).json({ error: 'Failed to upload JSON to Pinata' });
+    }
+});
+
+
+module.exports = app;
+module.exports.handler = serverless(app);
