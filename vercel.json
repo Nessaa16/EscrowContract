@@ -2,16 +2,16 @@
   "version": 2,
   "builds": [
     {
-      "src": "package.json",
+      "src": "package.json", 
       "use": "@vercel/static-build",
       "config": {
-        "installCommand": "npm install",
+        "installCommand": "npm install", 
         "buildCommand": "npm run build", 
-        "outputDirectory": "dist"
+        "outputDirectory": "dist" 
       }
     },
     {
-      "src": "api/index.js",
+      "src": "api/index.js", 
       "use": "@vercel/node"
     }
   ],
@@ -21,8 +21,12 @@
       "dest": "/api" 
     },
     {
-      "src": "/(.*)",
-      "dest": "/index.html" 
+      "src": "/assets/(.*)",
+      "dest": "/dist/assets/$1" 
+    },
+    {
+      "src": "/(.*)", 
+      "dest": "/dist/index.html" 
     }
   ]
 }
