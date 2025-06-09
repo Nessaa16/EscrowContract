@@ -4,7 +4,6 @@ import abi from "./abi.json"
 const address = "0x5d0EeDC820CDafbEC7bc8458C8ceE8409FDaCC20"; // Your contract address
 const url = "https://ethereum-holesky-rpc.publicnode.com/"; // Holesky RPC URL
 
-
 /**
  * Function to connect wallet to DApp and get the first account address.
  * Requires 'ethereum' object (e.g., MetaMask).
@@ -75,9 +74,9 @@ async function ethWithoutWallet() {
  * @returns {Promise<any>} Transaction response.
  */
 export async function createEscrow(orderId, customer, orderFee, paymentDeadline) {
-    const contract = await ethContract(); // ethContract already uses window.ethereum
+    const contract = await ethContract(); 
     const tx = await contract.createEscrow(orderId, customer, orderFee, paymentDeadline);
-    return tx; // Return transaction object to await its confirmation
+    return tx; 
 }
 
 /**
@@ -87,7 +86,7 @@ export async function createEscrow(orderId, customer, orderFee, paymentDeadline)
  * @returns {Promise<any>} Transaction response.
  */
 export async function payEscrow(orderId, amountInWei) {
-    const contract = await ethContract(); // ethContract already uses window.ethereum
+    const contract = await ethContract(); 
     const tx = await contract.payEscrow(orderId, { value: amountInWei });
     return tx;
 }
@@ -128,14 +127,48 @@ export async function releaseToSeller(orderId) {
 }
 
 /**
- * Allows the customer or seller to cancel the transaction under certain conditions.
+ * Calls the smart contract to cancel the transaction.
  * @param {string} orderId - Order ID.
  * @returns {Promise<any>} Transaction response.
  */
-export async function cancelTransaction(orderId) {
+export async function cancelTransactionBlockchain(orderId) {
     const contract = await ethContract();
     const tx = await contract.cancelTransaction(orderId);
     return tx;
+}
+
+/**
+ * Sends a request to the backend API to cancel and optionally delete a transaction from the database.
+ * @param {string} orderId - The ID of the order to cancel.
+ * @param {boolean} deleteFromDB - If true, the transaction will be deleted from the database.
+ * @param {string} [cancelReason='No reason provided'] - Optional reason for cancellation.
+ * @returns {Promise<Object>} Response from the backend API.
+ */
+export async function cancelTransactionBackend(orderId, deleteFromDB = false, cancelReason = 'No reason provided') {
+    try {
+        const response = await fetch(`/api/transactions/${orderId}/cancel`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                cancelReason: cancelReason,
+                cancelledBy: (await ethContract()).runner.address, 
+                deleteFromDB: deleteFromDB
+            }),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to cancel transaction in database');
+        }
+
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error("Error cancelling transaction in backend:", error.message);
+        throw error;
+    }
 }
 
 /**
@@ -169,14 +202,13 @@ function parseEscrow(data) {
         customer: data.customer,
         seller: data.seller,
         canceledBy: data.canceledBy,
-        orderFee: ethers.formatEther(data.orderFee), // Convert from Wei to Ether
-        paymentDeadline: Number(data.paymentDeadline), // Convert BigInt to Number
+        orderFee: ethers.formatEther(data.orderFee), 
+        paymentDeadline: Number(data.paymentDeadline), 
         status: statusMap[Number(data.status)],
         fundsDeposited: data.fundsDeposited,
     };
 }
 
-// Function to upload metadata to Pinata via your backend
 /**
  * Function to upload metadata to Pinata via the backend API.
  * @param {Object} metadata - Metadata object to be uploaded.

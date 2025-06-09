@@ -160,10 +160,8 @@ const CheckoutPage = ({
                     throw new Error(errorMessage);
                 }
 
-                // Parse successful response
                 let savedData;
                 try {
-                    // Try to parse the response text as JSON
                     savedData = JSON.parse(responseText);
                     console.log("Transaction data successfully sent to backend and saved:", savedData);
                 } catch (parseError) {

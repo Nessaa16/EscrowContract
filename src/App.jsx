@@ -5,9 +5,6 @@ import {
   createEscrow,
   payEscrow,
   getEscrow,
-  confirmOrderDelivered,
-  releaseToSeller,
-  cancelTransaction,
   connectWallet
 } from './connect';
 //k

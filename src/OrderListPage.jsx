@@ -8,7 +8,8 @@ import {
     deliverOrder,
     confirmOrderDelivered,
     releaseToSeller,
-    cancelTransaction,
+    cancelTransactionBlockchain, // Menggunakan nama yang lebih spesifik untuk blockchain
+    cancelTransactionBackend,    // Fungsi baru untuk memanggil API backend
     fetchTransactionsFromBackend // Import the new function
 } from '/src/connect.js';
 
@@ -132,12 +133,22 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
 
     const handleCancelTransaction = async (orderId) => {
         setIsLoadingOrders(true);
-        setModalMessage("Cancelling transaction on blockchain...");
+        setModalMessage("Cancelling transaction on blockchain and updating database...");
         setModalType('info');
         setShowModal(true);
         try {
-            const tx = await cancelTransaction(orderId);
+            // 1. Call smart contract to cancel the transaction on blockchain
+            const tx = await cancelTransactionBlockchain(orderId);
             await tx.wait();
+            console.log("Transaction cancelled on blockchain for orderId:", orderId);
+
+            // 2. Call backend API to update/delete transaction in MongoDB
+            // You can decide here if you want to delete it completely (true) or just update status (false)
+            // For a "cancel" button, typically you just update status and keep for audit trail.
+            // If you want to delete from DB, pass `true` as the second argument.
+            const backendResponse = await cancelTransactionBackend(orderId, true, "User cancelled order from frontend");
+            console.log("Backend response for cancellation:", backendResponse);
+
             setModalMessage("Transaction cancelled successfully!");
             setModalType('success');
             await fetchAndFilterOrders(); // Re-fetch from MongoDB to update status

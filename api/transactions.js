@@ -3,7 +3,7 @@ const router = express.Router();
 const Transaction = require('../models/transaction'); 
 
 // GET /api/transactions - Fetch all transactions
-router.get('/transactions', async (req, res) => {
+router.get('/', async (req, res) => {
     try {
         console.log('Fetching transactions from MongoDB...');
         const transactions = await Transaction.find({}).sort({ createdAt: -1 });
@@ -19,7 +19,7 @@ router.get('/transactions', async (req, res) => {
 });
 
 // GET /api/transactions/user/:walletAddress - Fetch transactions by user wallet address
-router.get('/transactions/user/:walletAddress', async (req, res) => {
+router.get('/user/:walletAddress', async (req, res) => {
     try {
         const { walletAddress } = req.params;
         if (!walletAddress) {
@@ -41,7 +41,7 @@ router.get('/transactions/user/:walletAddress', async (req, res) => {
 });
 
 // GET /api/transactions/:orderId - Get specific transaction by orderId
-router.get('/transactions/:orderId', async (req, res) => {
+router.get('/:orderId', async (req, res) => {
     try {
         const { orderId } = req.params;
         console.log(`Fetching transaction with orderId: ${orderId}`);
@@ -66,7 +66,7 @@ router.get('/transactions/:orderId', async (req, res) => {
 });
 
 // POST /api/transactions - Create a new transaction
-router.post('/transactions', async (req, res) => {
+router.post('/', async (req, res) => {
     try {
         console.log('Creating new transaction:', req.body);
         const transaction = new Transaction(req.body);
@@ -83,7 +83,7 @@ router.post('/transactions', async (req, res) => {
 });
 
 // PUT /api/transactions/:orderId - Update transaction (general update)
-router.put('/transactions/:orderId', async (req, res) => {
+router.put('/:orderId', async (req, res) => {
     try {
         const { orderId } = req.params;
         console.log(`Updating transaction ${orderId} with data:`, req.body);
@@ -113,7 +113,7 @@ router.put('/transactions/:orderId', async (req, res) => {
 });
 
 // POST /api/transactions/:orderId/cancel - Cancel an order (with option to delete from DB)
-router.post('/transactions/:orderId/cancel', async (req, res) => {
+router.post('/:orderId/cancel', async (req, res) => {
     try {
         const { orderId } = req.params;
         const { cancelReason, cancelledBy, deleteFromDB } = req.body;
@@ -208,7 +208,7 @@ router.post('/transactions/:orderId/cancel', async (req, res) => {
 });
 
 // POST /api/transactions/:orderId/ship - Ship an order
-router.post('/transactions/:orderId/ship', async (req, res) => {
+router.post('/:orderId/ship', async (req, res) => {
     try {
         const { orderId } = req.params;
         const { trackingNumber, shippingCarrier, shippingAddress, shippedBy } = req.body;
@@ -281,7 +281,7 @@ router.post('/transactions/:orderId/ship', async (req, res) => {
 });
 
 // POST /api/transactions/:orderId/complete - Complete/Deliver an order
-router.post('/transactions/:orderId/complete', async (req, res) => {
+router.post('/:orderId/complete', async (req, res) => {
     try {
         const { orderId } = req.params;
         const { deliveryConfirmation, completedBy } = req.body;
@@ -345,7 +345,7 @@ router.post('/transactions/:orderId/complete', async (req, res) => {
 });
 
 // GET /api/transactions/:orderId/status - Get order status
-router.get('/transactions/:orderId/status', async (req, res) => {
+router.get('/:orderId/status', async (req, res) => {
     try {
         const { orderId } = req.params;
         
@@ -362,11 +362,9 @@ router.get('/transactions/:orderId/status', async (req, res) => {
             status: transaction.blockchainStatus,
             createdAt: transaction.transactionDate,
             updatedAt: transaction.updatedAt,
-            // Include relevant timestamps based on status
             ...(transaction.shippedAt && { shippedAt: transaction.shippedAt }),
             ...(transaction.completedAt && { completedAt: transaction.completedAt }),
             ...(transaction.cancelledAt && { cancelledAt: transaction.cancelledAt }),
-            // Include additional details
             ...(transaction.trackingNumber && { trackingNumber: transaction.trackingNumber }),
             ...(transaction.shippingCarrier && { shippingCarrier: transaction.shippingCarrier }),
             ...(transaction.cancelReason && { cancelReason: transaction.cancelReason })
