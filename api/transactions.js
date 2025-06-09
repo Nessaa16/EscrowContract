@@ -1,382 +1,476 @@
-const express = require('express');
-const router = express.Router();
-const Transaction = require('../models/transaction'); 
+import React, { useState, useEffect } from 'react';
+import * as ethers from "ethers";
+import { BrowserProvider } from "ethers"; 
 
-// GET /api/transactions - Fetch all transactions
-router.get('/', async (req, res) => {
-    try {
-        console.log('Fetching transactions from MongoDB...');
-        const transactions = await Transaction.find({}).sort({ createdAt: -1 });
-        console.log(`Found ${transactions.length} transactions`);
-        res.json(transactions);
-    } catch (error) {
-        console.error('Error fetching transactions:', error);
-        res.status(500).json({
-            error: 'Failed to fetch transactions',
-            details: error.message
-        });
-    }
-});
+import {
+    connectWallet,
+    uploadMetadataToPinata,
+    getEscrow,
+    deliverOrder,
+    confirmOrderDelivered,
+    releaseToSeller,
+    cancelTransactionBlockchain,
+    cancelTransactionBackend,
+    fetchTransactionsFromBackend,
+    updateOrderStatusBackend  // Add this import for updating database
+} from '/src/connect.js';
 
-// GET /api/transactions/user/:walletAddress - Fetch transactions by user wallet address
-router.get('/user/:walletAddress', async (req, res) => {
-    try {
-        const { walletAddress } = req.params;
-        if (!walletAddress) {
-            return res.status(400).json({ error: 'Missing walletAddress parameter.' });
+/**
+ * OrderListPage component to display user transaction/order list.
+ * Uses `setModalMessage`, `setModalType`, `setShowModal` props from App.jsx
+ * to display modal notifications.
+ */
+const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, setShowModal }) => {
+    const [orders, setOrders] = useState([]); // This will store all fetched transactions from MongoDB
+    const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+    const [sellerOrders, setSellerOrders] = useState([]);
+    const [customerOrders, setCustomerOrders] = useState([]);
+
+    const [showReceiptInputModal, setShowReceiptInputModal] = useState(false);
+    const [currentOrderForReceipt, setCurrentOrderForReceipt] = useState(null);
+    const [receiptFile, setReceiptFile] = useState(null);
+    const [isSendingReceipt, setIsSendingReceipt] = useState(false);
+
+    const closeModal = () => {
+        setShowModal(false);
+        setModalMessage('');
+        setModalType('info');
+    };
+
+    // Function to load orders from MongoDB backend
+    const fetchAndFilterOrders = async () => {
+        if (!wallet) {
+            setOrders([]);
+            setSellerOrders([]);
+            setCustomerOrders([]);
+            return;
         }
 
-        const transactions = await Transaction.find({
-            $or: [
-                { customerWalletAddress: walletAddress.toLowerCase() },
-                { sellerWalletAddress: walletAddress.toLowerCase() }
-            ]
-        }).sort({ transactionDate: -1 });
+        setIsLoadingOrders(true);
+        setModalMessage("Fetching your orders from the database...");
+        setModalType('info');
+        setShowModal(true);
 
-        res.json(transactions);
-    } catch (err) {
-        console.error('Error fetching user transactions:', err.message);
-        res.status(500).json({ error: 'Failed to fetch user transactions.' });
-    }
-});
+        try {
+            const fetchedTransactions = await fetchTransactionsFromBackend(); // Fetch from MongoDB backend
+            console.log("Fetched transactions from MongoDB:", fetchedTransactions);
 
-// GET /api/transactions/:orderId - Get specific transaction by orderId
-router.get('/:orderId', async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        console.log(`Fetching transaction with orderId: ${orderId}`);
-        
-        const transaction = await Transaction.findOne({ orderId });
-        if (!transaction) {
-            return res.status(404).json({ 
-                error: 'Transaction not found', 
-                orderId 
-            });
-        }
-        
-        console.log(`Transaction found: ${transaction._id}`);
-        res.json(transaction);
-    } catch (error) {
-        console.error('Error fetching transaction:', error);
-        res.status(500).json({ 
-            error: 'Failed to fetch transaction', 
-            details: error.message 
-        });
-    }
-});
-
-// POST /api/transactions - Create a new transaction
-router.post('/', async (req, res) => {
-    try {
-        console.log('Creating new transaction:', req.body);
-        const transaction = new Transaction(req.body);
-        const savedTransaction = await transaction.save();
-        console.log('Transaction created:', savedTransaction._id);
-        res.status(201).json(savedTransaction);
-    } catch (error) {
-        console.error('Error creating transaction:', error);
-        res.status(400).json({
-            error: 'Failed to create transaction',
-            details: error.message
-        });
-    }
-});
-
-// PUT /api/transactions/:orderId - Update transaction (general update)
-router.put('/:orderId', async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        console.log(`Updating transaction ${orderId} with data:`, req.body);
-        
-        const transaction = await Transaction.findOneAndUpdate(
-            { orderId }, 
-            req.body, 
-            { new: true, runValidators: true }
-        );
-        
-        if (!transaction) {
-            return res.status(404).json({ 
-                error: 'Transaction not found', 
-                orderId 
-            });
-        }
-        
-        console.log(`Transaction updated: ${transaction._id}`);
-        res.json(transaction);
-    } catch (error) {
-        console.error('Error updating transaction:', error);
-        res.status(400).json({ 
-            error: 'Failed to update transaction', 
-            details: error.message 
-        });
-    }
-});
-
-// POST /api/transactions/:orderId/cancel - Cancel an order (with option to delete from DB)
-router.post('/:orderId/cancel', async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        const { cancelReason, cancelledBy, deleteFromDB } = req.body;
-        
-        console.log(`Attempting to cancel order: ${orderId}`);
-        console.log('Cancel data:', { cancelReason, cancelledBy, deleteFromDB });
-        
-        // Find the transaction first
-        const transaction = await Transaction.findOne({ orderId });
-        if (!transaction) {
-            return res.status(404).json({ 
-                error: 'Transaction not found', 
-                orderId 
-            });
-        }
-        
-        // Check if transaction can be cancelled
-        const cancellableStatuses = ['AWAITING_DELIVERY', 'AWAITING_PAYMENT'];
-        if (!cancellableStatuses.includes(transaction.blockchainStatus)) {
-            return res.status(400).json({ 
-                error: 'Transaction cannot be cancelled', 
-                currentStatus: transaction.blockchainStatus,
-                orderId,
-                message: `Only orders with status ${cancellableStatuses.join(' or ')} can be cancelled`
-            });
-        }
-        
-        // Option 1: Delete from database completely
-        if (deleteFromDB === true) {
-            const deletedTransaction = await Transaction.findOneAndDelete({ orderId });
-            
-            console.log(`Order ${orderId} cancelled and deleted from database`);
-            console.log('Deleted transaction data:', {
-                orderId: deletedTransaction.orderId,
-                status: deletedTransaction.blockchainStatus,
-                totalAmount: deletedTransaction.totalAmountETH,
-                customer: deletedTransaction.customerWalletAddress
-            });
-            
-            res.json({
-                success: true,
-                message: 'Order cancelled and deleted from database successfully',
-                action: 'DELETED_FROM_DATABASE',
-                deletedTransaction: {
-                    orderId: deletedTransaction.orderId,
-                    totalAmountETH: deletedTransaction.totalAmountETH,
-                    customerWalletAddress: deletedTransaction.customerWalletAddress,
-                    originalStatus: deletedTransaction.blockchainStatus,
-                    deletedAt: new Date().toISOString()
-                }
-            });
-        } 
-        // Option 2: Update status to cancelled (keep in database for audit trail)
-        else {
-            const updatedTransaction = await Transaction.findOneAndUpdate(
-                { orderId },
-                {
-                    blockchainStatus: 'CANCELLED',
-                    cancelReason: cancelReason || 'No reason provided',
-                    cancelledBy: cancelledBy || 'Unknown',
-                    cancelledAt: new Date(),
-                    updatedAt: new Date()
-                },
-                { new: true, runValidators: true }
+            // Filter transactions based on the connected wallet address
+            const filteredSellerOrders = fetchedTransactions.filter(
+                (order) => order.sellerWalletAddress && order.sellerWalletAddress.toLowerCase() === wallet.toLowerCase()
             );
+            const filteredCustomerOrders = fetchedTransactions.filter(
+                (order) => order.customerWalletAddress && order.customerWalletAddress.toLowerCase() === wallet.toLowerCase()
+            );
+
+            setOrders(fetchedTransactions); // Keep all fetched transactions if needed elsewhere
+            setSellerOrders(filteredSellerOrders);
+            setCustomerOrders(filteredCustomerOrders);
+
+            setModalMessage("Orders fetched successfully from database!");
+            setModalType('success');
+        } catch (error) {
+            console.error("Error fetching orders from backend:", error);
+            setModalMessage(`Failed to fetch orders from database: ${error.message || error.toString()}`);
+            setModalType('error');
+        } finally {
+            setIsLoadingOrders(false);
+            // Only show modal if there's a message, otherwise it can be hidden
+            if (setModalMessage) setShowModal(true);
+        }
+    };
+
+    // Use this effect to fetch orders from MongoDB when the wallet changes or component mounts
+    useEffect(() => {
+        fetchAndFilterOrders();
+    }, [wallet]);
+
+    // Functions to handle blockchain interactions (confirm, release, cancel)
+    // These functions should call the respective contract functions from connect.js
+    // and then re-fetch orders from the backend to update the UI.
+
+    const handleConfirmDelivered = async (orderId) => {
+        setIsLoadingOrders(true);
+        setModalMessage("Confirming order delivery on blockchain...");
+        setModalType('info');
+        setShowModal(true);
+        try {
+            const tx = await confirmOrderDelivered(orderId);
+            await tx.wait();
+            setModalMessage("Order delivery confirmed successfully!");
+            setModalType('success');
+            await fetchAndFilterOrders(); // Re-fetch from MongoDB to update status
+        } catch (error) {
+            console.error("Failed to confirm order delivery:", error);
+            setModalMessage(`Failed to confirm delivery: ${error.message || error.toString()}`);
+            setModalType('error');
+        } finally {
+            setIsLoadingOrders(false);
+            setShowModal(true);
+        }
+    };
+
+    const handleReleaseToSeller = async (orderId) => {
+        setIsLoadingOrders(true);
+        setModalMessage("Releasing funds to seller on blockchain...");
+        setModalType('info');
+        setShowModal(true);
+        try {
+            const tx = await releaseToSeller(orderId);
+            await tx.wait();
+            setModalMessage("Funds released to seller successfully!");
+            setModalType('success');
+            await fetchAndFilterOrders(); // Re-fetch from MongoDB to update status
+        } catch (error) {
+            console.error("Failed to release funds to seller:", error);
+            setModalMessage(`Failed to release funds: ${error.message || error.toString()}`);
+            setModalType('error');
+        } finally {
+            setIsLoadingOrders(false);
+            setShowModal(true);
+        }
+    };
+
+    const handleCancelTransaction = async (orderId) => {
+        setIsLoadingOrders(true);
+        setModalMessage("Cancelling transaction on blockchain and updating database...");
+        setModalType('info');
+        setShowModal(true);
+        let nft
+        
+        try {
+            // 1. Call smart contract to cancel the transaction on blockchain
+            const tx = await cancelTransactionBlockchain(orderId);
+            await tx.wait();
+            console.log("Transaction cancelled on blockchain for orderId:", orderId);
+
+            // 2. Call backend API to update/delete transaction in MongoDB
+            const backendResponse = await cancelTransactionBackend(orderId, true, "User cancelled order from frontend");
+            console.log("Backend response for cancellation:", backendResponse);
+
+            setModalMessage("Transaction cancelled successfully!");
+            setModalType('success');
+            await fetchAndFilterOrders(); // Re-fetch from MongoDB to update status
+        } catch (error) {
+            console.error("Failed to cancel transaction:", error);
+            setModalMessage(`Failed to cancel transaction: ${error.message || error.toString()}`);
+            setModalType('error');
+        } finally {
+            setIsLoadingOrders(false);
+            setShowModal(true);
+        }
+    };
+
+    // Function to open receipt submission modal
+    const handleOpenSendReceiptModal = (order) => {
+        setCurrentOrderForReceipt(order);
+        setReceiptFile(null); // Reset input file
+        setShowReceiptInputModal(true);
+    };
+
+    // Function to close receipt submission modal
+    const handleCloseSendReceiptModal = () => {
+        setShowReceiptInputModal(false);
+        setCurrentOrderForReceipt(null);
+        setReceiptFile(null);
+    };
+
+    // Function to send receipt (calls deliverOrder)
+    const handleSendReceipt = async () => {
+        if (!currentOrderForReceipt || !receiptFile) {
+            setModalMessage("Order data or receipt file missing.");
+            setModalType('error');
+            setShowModal(true);
+            return;
+        }
+
+        setIsSendingReceipt(true);
+        setModalMessage("Uploading file to Pinata IPFS via backend...");
+        setModalType('info');
+        setShowModal(true);
+
+        let nft;
+        let metadataUri;
+
+        try {
+            // Mengunggah file ke Pinata
+            try {
+                const hash = "https://gateway.pinata.cloud/ipfs/" + (await pinata.upload.public.file(receiptFile)).cid; // Unggah ke Pinata
+                console.log(hash)
+                nft = await pinata.upload.public.json({
+                    name: currentOrderForReceipt.orderId,
+                    image: hash,
+                    description: `Receipt for order ${currentOrderForReceipt.orderId}`,
+                    orderFee: currentOrderForReceipt.totalAmountETH + " ETH",
+                    seller: currentOrderForReceipt.sellerWalletAddress,
+                });
+                
+                metadataUri = `https://gateway.pinata.cloud/ipfs/${nft.cid}`;
+                console.log("Metadata URI:", metadataUri);
+
+                setModalMessage("File uploaded to IPFS. Sending transaction to blockchain...");
+                setModalType('info');
+
+                const tokenId = Math.floor(Date.now() / 1000); // tokenId bisa berupa timestamp atau ID unik lainnya
+                const tx = await deliverOrder(currentOrderForReceipt.orderId, tokenId, metadataUri);
+                await tx.wait(); // Tunggu transaksi dikonfirmasi
+                console.log("Blockchain transaction completed, NFT CID:", nft.cid);
+
+                // Update database status to IN_DELIVERY after successful blockchain transaction
+                setModalMessage("Blockchain transaction completed. Updating database status...");
+                setModalType('info');
+                
+                try {
+                    const updateResponse = await updateOrderStatusBackend(currentOrderForReceipt.orderId, {
+                        blockchainStatus: 'IN_DELIVERY',
+                        uri: metadataUri,
+                        shippedAt: new Date().toISOString(),
+                        shippedBy: wallet // Current user wallet address
+                    });
+                    
+                    console.log("Database update response:", updateResponse);
+                    
+                    setModalMessage(`Receipt sent successfully for Order ID: ${currentOrderForReceipt.orderId}! Status updated to IN_DELIVERY.`);
+                    setModalType('success');
+                    
+                } catch (dbError) {
+                    console.error("Database update failed:", dbError);
+                    setModalMessage(`Receipt sent to blockchain but database update failed: ${dbError.message}. Please refresh to see current status.`);
+                    setModalType('warning');
+                }
+
+            } catch (pinataError) {
+                console.error("Pinata upload error:", pinataError);
+                throw new Error(`Failed to upload to Pinata: ${pinataError.message}`);
+            }
+
+        } catch (error) {
+            console.error("Failed to send receipt:", error);
+            setModalMessage(`Failed to send receipt: ${error.message || error.toString()}`);
+            setModalType('error');
+        } finally {
+            setIsSendingReceipt(false);
+            setShowModal(true);
             
-            console.log(`Order ${orderId} cancelled successfully (kept in database)`);
-            console.log('Updated transaction:', {
-                orderId: updatedTransaction.orderId,
-                newStatus: updatedTransaction.blockchainStatus,
-                cancelReason: updatedTransaction.cancelReason,
-                cancelledBy: updatedTransaction.cancelledBy,
-                cancelledAt: updatedTransaction.cancelledAt
-            });
-            
-            res.json({
-                success: true,
-                message: 'Order cancelled successfully',
-                action: 'STATUS_UPDATED_TO_CANCELLED',
-                transaction: updatedTransaction
-            });
+            // Always refresh the orders list and close modal at the end
+            handleCloseSendReceiptModal();
+            await fetchAndFilterOrders();
         }
-        
-    } catch (error) {
-        console.error('Error cancelling order:', error);
-        res.status(500).json({
-            error: 'Failed to cancel order',
-            details: error.message,
-            orderId: req.params.orderId
-        });
-    }
-});
+    };
 
-// POST /api/transactions/:orderId/ship - Ship an order
-router.post('/:orderId/ship', async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        const { trackingNumber, shippingCarrier, shippingAddress, shippedBy } = req.body;
-        
-        console.log(`Attempting to ship order: ${orderId}`);
-        console.log('Shipping data:', { trackingNumber, shippingCarrier, shippingAddress, shippedBy });
-        
-        // Find the transaction first
-        const transaction = await Transaction.findOne({ orderId });
-        if (!transaction) {
-            return res.status(404).json({ 
-                error: 'Transaction not found', 
-                orderId 
-            });
-        }
-        
-        // Check if transaction can be shipped
-        if (transaction.blockchainStatus !== 'AWAITING_DELIVERY') {
-            return res.status(400).json({ 
-                error: 'Transaction cannot be shipped', 
-                currentStatus: transaction.blockchainStatus,
-                orderId,
-                message: 'Only orders with AWAITING_DELIVERY status can be shipped'
-            });
-        }
-        
-        // Prepare shipping data
-        const shippingData = {
-            blockchainStatus: 'SHIPPED',
-            shippedAt: new Date(),
-            updatedAt: new Date()
-        };
-        
-        // Add optional shipping details if provided
-        if (trackingNumber) shippingData.trackingNumber = trackingNumber;
-        if (shippingCarrier) shippingData.shippingCarrier = shippingCarrier;
-        if (shippingAddress) shippingData.shippingAddress = shippingAddress;
-        if (shippedBy) shippingData.shippedBy = shippedBy;
-        
-        // Update transaction status to shipped
-        const updatedTransaction = await Transaction.findOneAndUpdate(
-            { orderId },
-            shippingData,
-            { new: true, runValidators: true }
-        );
-        
-        console.log(`Order ${orderId} shipped successfully`);
-        console.log('Updated transaction:', {
-            orderId: updatedTransaction.orderId,
-            newStatus: updatedTransaction.blockchainStatus,
-            shippedAt: updatedTransaction.shippedAt,
-            trackingNumber: updatedTransaction.trackingNumber,
-            shippingCarrier: updatedTransaction.shippingCarrier
-        });
-        
-        res.json({
-            success: true,
-            message: 'Order shipped successfully',
-            transaction: updatedTransaction
-        });
-        
-    } catch (error) {
-        console.error('Error shipping order:', error);
-        res.status(500).json({
-            error: 'Failed to ship order',
-            details: error.message,
-            orderId: req.params.orderId
-        });
-    }
-});
+    return (
+        <div className="container mx-auto p-8 bg-white rounded-2xl shadow-xl min-h-[500px]">
+            <h2 className="text-4xl font-extrabold text-gray-900 mb-8 text-center">Daftar Transaksi Anda</h2>
 
-// POST /api/transactions/:orderId/complete - Complete/Deliver an order
-router.post('/:orderId/complete', async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        const { deliveryConfirmation, completedBy } = req.body;
-        
-        console.log(`Attempting to complete order: ${orderId}`);
-        
-        // Find the transaction first
-        const transaction = await Transaction.findOne({ orderId });
-        if (!transaction) {
-            return res.status(404).json({ 
-                error: 'Transaction not found', 
-                orderId 
-            });
-        }
-        
-        // Check if transaction can be completed
-        if (transaction.blockchainStatus !== 'SHIPPED') {
-            return res.status(400).json({ 
-                error: 'Transaction cannot be completed', 
-                currentStatus: transaction.blockchainStatus,
-                orderId,
-                message: 'Only shipped orders can be completed'
-            });
-        }
-        
-        // Update transaction status to completed
-        const updatedTransaction = await Transaction.findOneAndUpdate(
-            { orderId },
-            {
-                blockchainStatus: 'COMPLETED',
-                completedAt: new Date(),
-                deliveryConfirmation: deliveryConfirmation || 'Delivered successfully',
-                completedBy: completedBy || 'System',
-                updatedAt: new Date()
-            },
-            { new: true, runValidators: true }
-        );
-        
-        console.log(`Order ${orderId} completed successfully`);
-        console.log('Completed transaction:', {
-            orderId: updatedTransaction.orderId,
-            newStatus: updatedTransaction.blockchainStatus,
-            completedAt: updatedTransaction.completedAt,
-            deliveryConfirmation: updatedTransaction.deliveryConfirmation
-        });
-        
-        res.json({
-            success: true,
-            message: 'Order completed successfully',
-            transaction: updatedTransaction
-        });
-        
-    } catch (error) {
-        console.error('Error completing order:', error);
-        res.status(500).json({
-            error: 'Failed to complete order',
-            details: error.message,
-            orderId: req.params.orderId
-        });
-    }
-});
+            {!wallet ? (
+                <p className="text-gray-500 text-center py-8 text-lg">
+                    Silakan hubungkan dompet Anda untuk melihat daftar transaksi.
+                </p>
+            ) : isLoadingOrders ? (
+                <div className="text-center py-8">
+                    <p className="text-gray-60-text-lg">Memuat daftar transaksi...</p>
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mt-4"></div>
+                </div>
+            ) : orders.length === 0 ? (
+                <p className="text-gray-500 text-center py-8 text-lg">
+                    Tidak ada transaksi yang ditemukan untuk dompet ini.
+                </p>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {/* Seller Orders Section */}
+                    <div>
+                        <h3 className="text-2xl font-bold text-gray-800 mb-4 border-b-2 pb-2 border-green-200">Order Anda Sebagai Penjual ({sellerOrders.length})</h3>
+                        {sellerOrders.length === 0 ? (
+                            <p className="text-gray-500">Tidak ada order di mana Anda sebagai penjual.</p>
+                        ) : (
+                            <div className="space-y-4">
+                                {sellerOrders.map((order) => (
+                                    <div key={order.orderId} className="bg-green-50 p-6 rounded-lg shadow-sm border border-green-200">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <h4 className="text-xl font-semibold text-gray-800 break-words pr-2">Order ID: <span className="text-green-700 text-lg">{order.orderId}</span></h4>
+                                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${order.blockchainStatus === 'COMPLETE' ? 'bg-green-100 text-green-800' :
+                                                order.blockchainStatus === 'CANCELED' ? 'bg-red-100 text-red-800' :
+                                                    order.blockchainStatus === 'AWAITING_DELIVERY' ? 'bg-yellow-100 text-yellow-800' :
+                                                        'bg-blue-100 text-blue-800'
+                                                }`}>
+                                                {order.blockchainStatus.replace(/_/g, ' ')}
+                                            </span>
+                                        </div>
+                                        <p className="text-gray-700">Customer: <span className="font-mono text-sm">{order.customerWalletAddress}</span></p>
+                                        <p className="text-gray-700">Total Amount: <span className="font-bold text-green-600">{order.totalAmountETH} ETH</span></p>
+                                        <p className="text-gray-700">Items:</p>
+                                        <ul className="list-disc list-inside text-gray-600 ml-4 text-sm">
+                                            {order.items.map((item, idx) => (
+                                                <li key={idx}>{item.name} (Qty: {item.quantity}, Price: {item.price} ETH)</li>
+                                            ))}
+                                        </ul>
+                                        <p className="text-gray-700">Transaction Date: <span className="font-medium">{new Date(order.transactionDate).toLocaleString()}</span></p>
 
-// GET /api/transactions/:orderId/status - Get order status
-router.get('/:orderId/status', async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        
-        const transaction = await Transaction.findOne({ orderId });
-        if (!transaction) {
-            return res.status(404).json({ 
-                error: 'Transaction not found', 
-                orderId 
-            });
-        }
-        
-        res.json({
-            orderId: transaction.orderId,
-            status: transaction.blockchainStatus,
-            createdAt: transaction.transactionDate,
-            updatedAt: transaction.updatedAt,
-            ...(transaction.shippedAt && { shippedAt: transaction.shippedAt }),
-            ...(transaction.completedAt && { completedAt: transaction.completedAt }),
-            ...(transaction.cancelledAt && { cancelledAt: transaction.cancelledAt }),
-            ...(transaction.trackingNumber && { trackingNumber: transaction.trackingNumber }),
-            ...(transaction.shippingCarrier && { shippingCarrier: transaction.shippingCarrier }),
-            ...(transaction.cancelReason && { cancelReason: transaction.cancelReason })
-        });
-        
-    } catch (error) {
-        console.error('Error fetching order status:', error);
-        res.status(500).json({
-            error: 'Failed to fetch order status',
-            details: error.message
-        });
-    }
-});
+                                        {order.blockchainStatus === 'AWAITING_DELIVERY' && (
+                                            <button
+                                                onClick={() => handleOpenSendReceiptModal(order)}
+                                                className="mt-4 w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                disabled={isSendingReceipt || isLoadingOrders}
+                                            >
+                                                {isSendingReceipt ? 'Sending...' : 'Kirim Resi'}
+                                            </button>
+                                        )}
+                                        {order.blockchainStatus === 'IN_DELIVERY' && (
+                                            <p className="text-blue-500 text-sm mt-2">Menunggu konfirmasi dari pelanggan.</p>
+                                        )}
+                                        {order.blockchainStatus === 'DELIVERED' && (
+                                            <p className="text-green-500 text-sm mt-2">Menunggu pelepasan dana dari pelanggan.</p>
+                                        )}
+                                        {order.blockchainStatus === 'AWAITING_PAYMENT' && (
+                                            <p className="text-yellow-500 text-sm mt-2">Menunggu pembayaran dari pelanggan.</p>
+                                        )}
+                                        {order.blockchainStatus === 'COMPLETE' && order.uri && (
+                                            <p className="text-green-600 text-sm mt-2">Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
+                                        )}
+                                        {order.blockchainStatus !== 'CANCELED' && order.blockchainStatus !== 'COMPLETE' && (
+                                            <button
+                                                onClick={() => handleCancelTransaction(order.orderId)}
+                                                className="mt-2 w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                disabled={isSendingReceipt || isLoadingOrders}
+                                            >
+                                                Batalkan Transaksi
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
 
-module.exports = router;
+                    {/* Buyer Orders Section */}
+                    <div>
+                        <h3 className="text-2xl font-bold text-gray-800 mb-4 border-b-2 pb-2 border-blue-200">Order Anda Sebagai Pembeli ({customerOrders.length})</h3>
+                        {customerOrders.length === 0 ? (
+                            <p className="text-gray-500">Tidak ada order di mana Anda sebagai pembeli.</p>
+                        ) : (
+                            <div className="space-y-4">
+                                {customerOrders.map((order) => (
+                                    <div key={order.orderId} className="bg-blue-50 p-6 rounded-lg shadow-sm border border-blue-200">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <h4 className="text-xl font-semibold text-gray-800 break-words pr-2">Order ID: <span className="text-blue-700 text-lg">{order.orderId}</span></h4>
+                                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${order.blockchainStatus === 'COMPLETE' ? 'bg-green-100 text-green-800' :
+                                                order.blockchainStatus === 'CANCELED' ? 'bg-red-100 text-red-800' :
+                                                    order.blockchainStatus === 'AWAITING_PAYMENT' ? 'bg-yellow-100 text-yellow-800' :
+                                                        'bg-blue-100 text-blue-800'
+                                                }`}>
+                                                {order.blockchainStatus.replace(/_/g, ' ')}
+                                            </span>
+                                        </div>
+                                        <p className="text-gray-700">Seller: <span className="font-mono text-sm">{order.sellerWalletAddress}</span></p>
+                                        <p className="text-gray-700">Total Amount: <span className="font-bold text-blue-600">{order.totalAmountETH} ETH</span></p>
+                                        <p className="text-gray-700">Items:</p>
+                                        <ul className="list-disc list-inside text-gray-600 ml-4 text-sm">
+                                            {order.items.map((item, idx) => (
+                                                <li key={idx}>{item.name} (Qty: {item.quantity}, Price: {item.price} ETH)</li>
+                                            ))}
+                                        </ul>
+                                        <p className="text-gray-700">Transaction Date: <span className="font-medium">{new Date(order.transactionDate).toLocaleString()}</span></p>
+                                        {order.blockchainStatus === 'IN_DELIVERY' && (
+                                            <button
+                                                onClick={() => handleConfirmDelivered(order.orderId)}
+                                                className="mt-4 w-full bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                disabled={isLoadingOrders}
+                                            >
+                                                Konfirmasi Diterima
+                                            </button>
+                                        )}
+                                        {order.blockchainStatus === 'DELIVERED' && (
+                                            <button
+                                                onClick={() => handleReleaseToSeller(order.orderId)}
+                                                className="mt-4 w-full bg-teal-600 text-white py-2 rounded-lg hover:bg-teal-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                disabled={isLoadingOrders}
+                                            >
+                                                Lepaskan Dana
+                                            </button>
+                                        )}
+                                        {order.blockchainStatus === 'AWAITING_PAYMENT' && (
+                                            <p className="text-yellow-500 text-sm mt-2">Menunggu pembayaran Anda. (Pembayaran dilakukan di halaman checkout)</p>
+                                        )}
+                           {order.blockchainStatus === 'COMPLETE' && order.uri && (
+                                <p className="text-green-600 text-sm mt-2">Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
+                            )}
+                                        {order.blockchainStatus !== 'CANCELED' && order.blockchainStatus !== 'COMPLETE' && (
+                                            <button
+                                                onClick={() => handleCancelTransaction(order.orderId)}
+                                                className="mt-2 w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                disabled={isLoadingOrders}
+                                            >
+                                                Batalkan Transaksi
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Modal for receipt input */}
+            {showReceiptInputModal && (
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+                        <h3 className="text-2xl font-bold text-gray-800 mb-4">Kirim Resi untuk Order: <span className="text-blue-600 break-words">{currentOrderForReceipt?.orderId}</span></h3>
+                        <p className="text-gray-700 mb-4">Pilih gambar resi (.jpg, .png, .gif):</p>
+                        <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => setReceiptFile(e.target.files[0])}
+                            className="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            disabled={isSendingReceipt}
+                        />
+                        {receiptFile && <p className="text-sm text-gray-600 mb-4">File terpilih: {receiptFile.name}</p>}
+                        <div className="flex justify-end gap-4">
+                            <button
+                                onClick={handleCloseSendReceiptModal}
+                                className="bg-gray-300 text-gray-800 px-6 py-2 rounded-lg hover:bg-gray-400 transition-colors duration-300"
+                                disabled={isSendingReceipt}
+                            >
+                                Batal
+                            </button>
+                            <button
+                                onClick={handleSendReceipt}
+                                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled={isSendingReceipt || !receiptFile}
+                            >
+                                {isSendingReceipt ? 'Mengirim...' : 'Kirim Resi'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const uploadToPinata = async (file) => {
+  const reader = new FileReader();
+
+  reader.onloadend = async () => {
+    const res = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${your_pinata_jwt}`,
+      },
+      body: createFormData(file)
+    });
+
+    const json = await res.json();
+    console.log("Image IPFS Hash:", json.IpfsHash);
+  };
+
+  reader.readAsArrayBuffer(file); 
+};
+
+function createFormData(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return formData;
+}
+
+export default OrderListPage;

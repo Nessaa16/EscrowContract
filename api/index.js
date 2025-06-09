@@ -30,7 +30,7 @@ if (mongoose.connection.readyState === 0) {
 
 app.use('/api/transactions', transactionsRouter);
 
-app.post('/upload-json-to-pinata', async (req, res) => {
+app.post('/api/upload-json-to-pinata', async (req, res) => {
     try {
         const { jsonContent } = req.body;
         if (!jsonContent) {
