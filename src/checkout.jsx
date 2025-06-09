@@ -85,62 +85,116 @@ const CheckoutPage = ({
             console.log("Pay Escrow Tx:", payEscrowTx);
             await payEscrowTx.wait(); // Tunggu transaksi pembayaran dikonfirmasi juga
 
-            // 🚨 START OF NEW CODE BLOCK: Save transaction to backend MongoDB 🚨
+            // 🚨 FIXED: Save transaction to backend MongoDB 🚨
             console.log("Saving transaction data to backend...");
             setModalMessage("Saving transaction data to database...");
             setModalType('info');
             setShowModal(true);
 
             try {
+                // More robust data preparation
                 const transactionData = {
                     orderId: orderId,
                     customerWalletAddress: signerAddress,
                     sellerWalletAddress: address, 
-
                     items: cartItems.map(item => ({
-                        name: item.name,
-                        quantity: item.quantity,
-                        price: item.price,
+                        id: item.id || `item_${Date.now()}_${Math.random()}`, // Add the missing id field
+                        name: String(item.name || ''),
+                        quantity: parseInt(item.quantity) || 1,
+                        price: parseFloat(item.price) || 0,
                     })),
-                    totalAmountETH: total, 
+                    totalAmountETH: parseFloat(total) || 0,
                     blockchainStatus: 'AWAITING_DELIVERY', 
-                    transactionDate: new Date().toISOString() 
+                    transactionDate: new Date().toISOString() // Use ISO string for better compatibility
                 };
 
-                const response = await fetch('/api/transactions', {
+                console.log("=== TRANSACTION DATA DEBUG ===");
+                console.log("Original cartItems:", cartItems);
+                console.log("Original total:", total);
+                console.log("Processed transaction data:", JSON.stringify(transactionData, null, 2));
+
+                // Get the base URL dynamically
+                const baseUrl = window.location.origin;
+                const apiUrl = `${baseUrl}/api/transactions`;
+                
+                console.log("API URL:", apiUrl);
+                console.log("Making POST request...");
+
+                const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'Accept': 'application/json',
                     },
                     body: JSON.stringify(transactionData),
                 });
 
+                console.log("=== RESPONSE DEBUG ===");
+                console.log("Response status:", response.status);
+                console.log("Response statusText:", response.statusText);
+                console.log("Response ok:", response.ok);
+                
+                // Get response body as text first
+                const responseText = await response.text();
+                console.log("Raw response body:", responseText);
+
+                // Check if response is OK
                 if (!response.ok) {
-                    const errorData = await response.json(); 
-                    throw new Error(errorData.error || `Failed to save transaction data to backend. Status: ${response.status}`);
+                    let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                    
+                    try {
+                        // Try to parse as JSON if it looks like JSON
+                        if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
+                            const jsonError = JSON.parse(responseText);
+                            console.log("Parsed error JSON:", jsonError);
+                            errorMessage = jsonError.error || jsonError.message || jsonError.details || errorMessage;
+                        } else {
+                            errorMessage = responseText || errorMessage;
+                        }
+                    } catch (parseError) {
+                        console.error("Error parsing error response:", parseError);
+                        errorMessage = responseText || errorMessage;
+                    }
+                    
+                    console.error("Final error message:", errorMessage);
+                    throw new Error(errorMessage);
                 }
 
-                const savedData = await response.json(); 
-                console.log("Transaction data successfully sent to backend and saved:", savedData);
-                setModalMessage("Checkout successful! Data saved to database!");
+                // Parse successful response
+                let savedData;
+                try {
+                    // Try to parse the response text as JSON
+                    savedData = JSON.parse(responseText);
+                    console.log("Transaction data successfully sent to backend and saved:", savedData);
+                } catch (parseError) {
+                    console.log("Response is not JSON, using text response:", responseText);
+                    savedData = { message: responseText };
+                }
+                
+                // Show success message
+                setModalMessage(`Checkout successful! Order ID: ${orderId}. Transaction confirmed and saved to database.`);
                 setModalType('success');
+                setShowModal(true);
+                
+                // Call success callback
+                onCheckoutSuccess();
 
             } catch (dbError) {
                 console.error("Error saving transaction data to database:", dbError);
+                console.error("Full error object:", dbError);
+                
                 setModalMessage(`Checkout successful on blockchain, but FAILED to save data to database: ${dbError.message || dbError.toString()}`);
                 setModalType('error'); 
+                setShowModal(true);
             }
 
-            setModalMessage(`Checkout successful! Order ID: ${orderId}. Transaction confirmed.`);
-            setModalType('success');
-            onCheckoutSuccess(); // Panggil callback untuk membersihkan keranjang dan kembali
         } catch (error) {
             console.error("Checkout failed:", error);
             setModalMessage(`Checkout failed: ${error.message || error.toString()}`);
             setModalType('error');
+            setShowModal(true);
         } finally {
             setIsLoading(false);
-            setShowModal(true); 
         }
     };
 

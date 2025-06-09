@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ethers, BrowserProvider } from "ethers";
 
-// Import functions from your connect.js file
 import {
   createEscrow,
   payEscrow,
@@ -12,7 +11,6 @@ import {
   connectWallet
 } from './connect';
 //k
-// Import components
 import CheckoutPage from './checkout';
 import OrderListPage from './OrderListPage'; // Import komponen Daftar Order
 
