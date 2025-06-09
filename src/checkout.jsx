@@ -76,6 +76,7 @@ const CheckoutPage = ({
             setModalMessage("Creating escrow on blockchain...");
             // Gunakan signerAddress sebagai customer untuk memastikan konsistensi
             const createEscrowTx = await createEscrow(orderId, signerAddress, amountInWei, paymentDeadline);
+            console.log(createEscrowTx)
             await createEscrowTx.wait(); // Pastikan transaksi createEscrow dikonfirmasi
             console.log("Escrow created successfully and confirmed for orderId:", orderId);
 
@@ -83,6 +84,7 @@ const CheckoutPage = ({
             setModalMessage("Depositing funds to escrow...");
             // payEscrow akan menggunakan signerAddress secara internal melalui ethContract()
             const payEscrowTx = await payEscrow(orderId, amountInWei);
+            console.log(payEscrowTx)
             await payEscrowTx.wait(); // Tunggu transaksi pembayaran dikonfirmasi juga
 
             setModalMessage(`Checkout successful! Order ID: ${orderId}. Transaction confirmed.`);

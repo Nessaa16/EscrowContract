@@ -9,7 +9,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const Escrow = require('../../../models/escrow');
+const Escrow = require('../../models/escrow');
+const Transaction = require('../../models/transaction');
 
 const pinata = new PinataSDK({
     pinataJwt: process.env.VITE_JWT,
@@ -53,6 +54,35 @@ app.post('/upload-json-to-pinata', async (req, res) => {
     } catch (error) {
         console.error('Error uploading JSON to Pinata:', error);
         res.status(500).json({ error: 'Failed to upload JSON to Pinata' });
+    }
+});
+
+app.post('/transactions', async (req, res) => {
+    try {
+        const { orderId, customerWalletAddress, sellerWalletAddress, items, totalAmountETH, blockchainStatus } = req.body;
+
+        if (!orderId || !customerWalletAddress || !items || !totalAmountETH || !blockchainStatus) {
+            return res.status(400).json({ error: 'Missing required transaction data.' });
+        }
+
+        const newTransaction = new Transaction({
+            orderId,
+            customerWalletAddress,
+            sellerWalletAddress,
+            items,
+            totalAmountETH,
+            blockchainStatus,
+            // transactionHash: req.body.transactionHash
+        });
+
+        await newTransaction.save();
+        res.status(201).json({ message: 'Transaction saved successfully', transaction: newTransaction });
+    } catch (error) {
+        console.error('Error saving transaction:', error.message);
+        if (error.code === 11000) {
+            return res.status(409).json({ error: 'Transaction with this orderId already exists.' });
+        }
+        res.status(500).json({ error: 'Failed to save transaction.' });
     }
 });
 
