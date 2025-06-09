@@ -1,14 +1,18 @@
 require("@nomicfoundation/hardhat-toolbox");
-require('@openzeppelin/hardhat-upgrades');
-require("dotenv").config();
+require('dotenv').config();
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
-  solidity: "0.8.28",
+  solidity: "0.8.28", // Versi Solidity tetap sama
   networks: {
-    sepolia: {
-      url: process.env.INFURA_URL,
-      accounts: [process.env.PRIVATE_KEY]
+    holesky: { 
+      url: "https://ethereum-holesky-rpc.publicnode.com",
+      accounts: [process.env.HOLESKY_PRIVATE_KEY]
+    },
+  },
+  etherscan: {
+    apiKey: {
+      holesky: process.env.API_KEY
     }
   }
 };
