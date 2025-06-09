@@ -5,7 +5,7 @@ import { ethers, BrowserProvider } from "ethers";
 import {
     createEscrow,
     payEscrow,
-} from './connect'; // Assuming connect.js is in the same directory
+} from './connect'; 
 
 /**
  * Komponen CheckoutPage untuk menampilkan ringkasan pesanan dan konfirmasi checkout.
@@ -58,11 +58,9 @@ const CheckoutPage = ({
 
         try {
             // Dapatkan alamat signer yang sebenarnya dari window.ethereum
-            // Ini krusial untuk memastikan msg.sender di kontrak cocok dengan customer yang dibuat.
             const provider = new BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
             const signerAddress = await signer.getAddress(); // Alamat yang akan menandatangani transaksi
-
 
             // Hasilkan ID order unik (misalnya, timestamp + angka acak)
             const orderId = `order_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
@@ -76,7 +74,7 @@ const CheckoutPage = ({
             setModalMessage("Creating escrow on blockchain...");
             // Gunakan signerAddress sebagai customer untuk memastikan konsistensi
             const createEscrowTx = await createEscrow(orderId, signerAddress, amountInWei, paymentDeadline);
-            console.log(createEscrowTx)
+            console.log("Create Escrow Tx:", createEscrowTx);
             await createEscrowTx.wait(); // Pastikan transaksi createEscrow dikonfirmasi
             console.log("Escrow created successfully and confirmed for orderId:", orderId);
 
@@ -84,8 +82,54 @@ const CheckoutPage = ({
             setModalMessage("Depositing funds to escrow...");
             // payEscrow akan menggunakan signerAddress secara internal melalui ethContract()
             const payEscrowTx = await payEscrow(orderId, amountInWei);
-            console.log(payEscrowTx)
+            console.log("Pay Escrow Tx:", payEscrowTx);
             await payEscrowTx.wait(); // Tunggu transaksi pembayaran dikonfirmasi juga
+
+            // 🚨 START OF NEW CODE BLOCK: Save transaction to backend MongoDB 🚨
+            console.log("Saving transaction data to backend...");
+            setModalMessage("Saving transaction data to database...");
+            setModalType('info');
+            setShowModal(true);
+
+            try {
+                const transactionData = {
+                    orderId: orderId,
+                    customerWalletAddress: signerAddress,
+                    sellerWalletAddress: address, 
+
+                    items: cartItems.map(item => ({
+                        name: item.name,
+                        quantity: item.quantity,
+                        price: item.price,
+                    })),
+                    totalAmountETH: total, 
+                    blockchainStatus: 'AWAITING_DELIVERY', 
+                    transactionDate: new Date().toISOString() 
+                };
+
+                const response = await fetch('/api/transactions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(transactionData),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json(); 
+                    throw new Error(errorData.error || `Failed to save transaction data to backend. Status: ${response.status}`);
+                }
+
+                const savedData = await response.json(); 
+                console.log("Transaction data successfully sent to backend and saved:", savedData);
+                setModalMessage("Checkout successful! Data saved to database!");
+                setModalType('success');
+
+            } catch (dbError) {
+                console.error("Error saving transaction data to database:", dbError);
+                setModalMessage(`Checkout successful on blockchain, but FAILED to save data to database: ${dbError.message || dbError.toString()}`);
+                setModalType('error'); 
+            }
 
             setModalMessage(`Checkout successful! Order ID: ${orderId}. Transaction confirmed.`);
             setModalType('success');
@@ -96,7 +140,7 @@ const CheckoutPage = ({
             setModalType('error');
         } finally {
             setIsLoading(false);
-            setShowModal(true);
+            setShowModal(true); 
         }
     };
 
