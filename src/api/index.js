@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const serverless = require('serverless-http');
 const cors = require('cors');
 require('dotenv').config();
-const PinataSDK = require('@pinata/sdk'); // Import PinataSDK 
+const PinataSDK = require('@pinata/sdk');
 
 const app = express();
 app.use(cors());
@@ -17,24 +17,25 @@ const pinata = new PinataSDK({
     pinataGateway: process.env.VITE_GATEWAY
 });
 
-// Hanya connect jika belum terhubung
+// MongoDB connection
 if (mongoose.connection.readyState === 0) {
-  mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log('MongoDB connected'))
-    .catch((err) => console.error('MongoDB error:', err));
+    mongoose.connect(process.env.MONGO_URI)
+        .then(() => console.log('MongoDB connected'))
+        .catch((err) => console.error('MongoDB error:', err));
 }
 
-// New route for fetching transaction list
-app.get('/transactions-list', async (req, res) => {
-  try {
-    const transactions = await Transaction.find(); // Fetch from Transaction model
-    res.json(transactions);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch transaction data' });
-  }
+// Add /api prefix to all routes
+app.get('/api/transactions-list', async (req, res) => {
+    try {
+        const transactions = await Transaction.find();
+        res.json(transactions);
+    } catch (err) {
+        console.error('Error fetching transactions:', err);
+        res.status(500).json({ error: 'Failed to fetch transaction data' });
+    }
 });
 
-app.post('/upload-json-to-pinata', async (req, res) => {
+app.post('/api/upload-json-to-pinata', async (req, res) => {
     try {
         const { jsonContent } = req.body;
         if (!jsonContent) {
@@ -43,7 +44,7 @@ app.post('/upload-json-to-pinata', async (req, res) => {
 
         const options = {
             pinataMetadata: {
-                name: 'EscrowMetadata', // Nama metadata yang akan digunakan di Pinata
+                name: 'EscrowMetadata',
             },
             pinataOptions: {
                 cidVersion: 0,
@@ -58,7 +59,7 @@ app.post('/upload-json-to-pinata', async (req, res) => {
     }
 });
 
-app.post('/transactions', async (req, res) => {
+app.post('/api/transactions', async (req, res) => {
     try {
         const { orderId, customerWalletAddress, sellerWalletAddress, items, totalAmountETH, blockchainStatus } = req.body;
 
@@ -73,7 +74,6 @@ app.post('/transactions', async (req, res) => {
             items,
             totalAmountETH,
             blockchainStatus,
-            // transactionHash: req.body.transactionHash
         });
 
         await newTransaction.save();
@@ -87,6 +87,10 @@ app.post('/transactions', async (req, res) => {
     }
 });
 
+// Health check endpoint
+app.get('/api', (req, res) => {
+    res.json({ status: 'OK', message: 'API is running' });
+});
 
 module.exports = app;
 module.exports.handler = serverless(app);
