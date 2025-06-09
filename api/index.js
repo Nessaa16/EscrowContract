@@ -9,33 +9,52 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const Escrow = require('../models/escrow');
-const Transaction = require('../models/transaction');
+const Escrow = require('./models/escrow'); 
+const Transaction = require('./models/transaction'); 
 
 const pinata = new PinataSDK({
     pinataJwt: process.env.VITE_JWT,
     pinataGateway: process.env.VITE_GATEWAY
 });
 
-// MongoDB connection
+// Hanya connect jika belum terhubung
 if (mongoose.connection.readyState === 0) {
-    mongoose.connect(process.env.MONGO_URI)
-        .then(() => console.log('MongoDB connected'))
-        .catch((err) => console.error('MongoDB error:', err));
+  mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log('MongoDB connected'))
+    .catch((err) => console.error('MongoDB error:', err));
 }
 
-// Add /api prefix to all routes
-app.get('/api/transactions-list', async (req, res) => {
+app.get('/transactions', async (req, res) => {
+  try {
+    const transactions = await Transaction.find();
+    res.json(transactions);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch transactions' });
+  }
+});
+
+app.get('/transactions/user/:walletAddress', async (req, res) => {
     try {
-        const transactions = await Transaction.find();
+        const { walletAddress } = req.params;
+        if (!walletAddress) {
+            return res.status(400).json({ error: 'Missing walletAddress parameter.' });
+        }
+
+        const transactions = await Transaction.find({
+            $or: [
+                { customerWalletAddress: walletAddress.toLowerCase() },
+                { sellerWalletAddress: walletAddress.toLowerCase() }
+            ]
+        }).sort({ transactionDate: -1 });
+
         res.json(transactions);
     } catch (err) {
-        console.error('Error fetching transactions:', err);
-        res.status(500).json({ error: 'Failed to fetch transaction data' });
+        console.error('Error fetching user transactions:', err.message);
+        res.status(500).json({ error: 'Failed to fetch user transactions.' });
     }
 });
 
-app.post('/api/upload-json-to-pinata', async (req, res) => {
+app.post('/upload-json-to-pinata', async (req, res) => {
     try {
         const { jsonContent } = req.body;
         if (!jsonContent) {
@@ -51,7 +70,7 @@ app.post('/api/upload-json-to-pinata', async (req, res) => {
             },
         };
 
-        const result = await pinata.pinJSONToIPFS(jsonContent, options);
+        const result = await pinata.pinJSONToPinata(jsonContent, options);
         res.status(200).json(result);
     } catch (error) {
         console.error('Error uploading JSON to Pinata:', error);
@@ -59,7 +78,8 @@ app.post('/api/upload-json-to-pinata', async (req, res) => {
     }
 });
 
-app.post('/api/transactions', async (req, res) => {
+// Changed from '/api/transactions' to '/transactions'
+app.post('/transactions', async (req, res) => {
     try {
         const { orderId, customerWalletAddress, sellerWalletAddress, items, totalAmountETH, blockchainStatus } = req.body;
 
@@ -69,8 +89,8 @@ app.post('/api/transactions', async (req, res) => {
 
         const newTransaction = new Transaction({
             orderId,
-            customerWalletAddress,
-            sellerWalletAddress,
+            customerWalletAddress: customerWalletAddress.toLowerCase(),
+            sellerWalletAddress: sellerWalletAddress.toLowerCase(),
             items,
             totalAmountETH,
             blockchainStatus,
@@ -87,10 +107,6 @@ app.post('/api/transactions', async (req, res) => {
     }
 });
 
-// Health check endpoint
-app.get('/api', (req, res) => {
-    res.json({ status: 'OK', message: 'API is running' });
-});
 
 module.exports = app;
 module.exports.handler = serverless(app);
