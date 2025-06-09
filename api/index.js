@@ -9,8 +9,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const Escrow = require('../../models/escrow');
-const Transaction = require('../../models/transaction');
+const Escrow = require('../models/escrow');
+const Transaction = require('../models/transaction');
 
 const pinata = new PinataSDK({
     pinataJwt: process.env.VITE_JWT,
