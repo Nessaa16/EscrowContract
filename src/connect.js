@@ -198,11 +198,11 @@ export async function uploadMetadataToPinata(metadata) {
         }
 
         const data = await response.json();
-        return data.IpfsHash; // Pinata's response usually contains IpfsHash
+        return data.IpfsHash; 
     } catch (error) {
         console.error("Error uploading metadata to Pinata:", error.message);
         alert(`Failed to upload metadata: ${error.message}`);
-        throw error; // Re-throw to allow caller to handle
+        throw error; 
     }
 }
 
@@ -212,8 +212,7 @@ export async function uploadMetadataToPinata(metadata) {
  */
 export async function fetchTransactionsFromBackend() {
     try {
-        // IMPORTANT: Ensure this URL correctly targets your backend endpoint
-        const response = await fetch('/api/transactions-list', {
+        const response = await fetch('/api/transactions', {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -226,10 +225,10 @@ export async function fetchTransactionsFromBackend() {
         }
 
         const data = await response.json();
-        return data; // Returns array of transaction data from MongoDB
+        return data; 
     } catch (error) {
         console.error("Error fetching transactions from backend:", error.message);
         alert(`Failed to fetch transactions: ${error.message}`);
-        throw error; // Re-throw to allow caller to handle
+        throw error; 
     }
 }
