@@ -1,3 +1,4 @@
+// api/index.js
 const express = require('express');
 const mongoose = require('mongoose');
 const serverless = require('serverless-http');
@@ -9,21 +10,24 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const Escrow = require('./models/escrow'); 
-const Transaction = require('./models/transaction'); 
+// Paths relative to api/index.js
+// Assuming 'models' directory is a sibling to 'api'
+const Escrow = require('../models/escrow');
+const Transaction = require('../models/transaction');
 
 const pinata = new PinataSDK({
     pinataJwt: process.env.VITE_JWT,
     pinataGateway: process.env.VITE_GATEWAY
 });
 
-// Hanya connect jika belum terhubung
+// Only connect if not already connected
 if (mongoose.connection.readyState === 0) {
   mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('MongoDB connected'))
     .catch((err) => console.error('MongoDB error:', err));
 }
 
+// Routes WITHOUT the '/api' prefix
 app.get('/transactions', async (req, res) => {
   try {
     const transactions = await Transaction.find();
@@ -78,7 +82,6 @@ app.post('/upload-json-to-pinata', async (req, res) => {
     }
 });
 
-// Changed from '/api/transactions' to '/transactions'
 app.post('/transactions', async (req, res) => {
     try {
         const { orderId, customerWalletAddress, sellerWalletAddress, items, totalAmountETH, blockchainStatus } = req.body;
@@ -106,7 +109,6 @@ app.post('/transactions', async (req, res) => {
         res.status(500).json({ error: 'Failed to save transaction.' });
     }
 });
-
 
 module.exports = app;
 module.exports.handler = serverless(app);
