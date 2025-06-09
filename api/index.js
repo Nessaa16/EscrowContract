@@ -1,62 +1,38 @@
-// api/index.js
 const express = require('express');
 const mongoose = require('mongoose');
-const serverless = require('serverless-http');
-const cors = require('cors');
+const serverless = require('serverless-http'); // Required for Vercel serverless functions
+const cors = require('cors'); 
 require('dotenv').config();
-const PinataSDK = require('@pinata/sdk');
+const PinataSDK = require('@pinata/sdk'); // For Pinata interaction
 
-const app = express();
-app.use(cors());
+const app = express(); 
+app.use(cors()); 
 app.use(express.json());
 
-// Paths relative to api/index.js
-// Assuming 'models' directory is a sibling to 'api'
 const Escrow = require('../models/escrow');
 const Transaction = require('../models/transaction');
+
+const transactionsRouter = require('./transactions');
 
 const pinata = new PinataSDK({
     pinataJwt: process.env.VITE_JWT,
     pinataGateway: process.env.VITE_GATEWAY
 });
 
-// Only connect if not already connected
+// Connect to MongoDB using Mongoose.
 if (mongoose.connection.readyState === 0) {
   mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log('MongoDB connected'))
-    .catch((err) => console.error('MongoDB error:', err));
+    .then(() => console.log('MongoDB connected')) 
+    .catch((err) => console.error('MongoDB error:', err)); 
 }
 
-// Routes WITHOUT the '/api' prefix
-app.get('/transactions', async (req, res) => {
-  try {
-    const transactions = await Transaction.find();
-    res.json(transactions);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch transactions' });
-  }
-});
+app.use('/api', transactionsRouter);
 
-app.get('/transactions/user/:walletAddress', async (req, res) => {
-    try {
-        const { walletAddress } = req.params;
-        if (!walletAddress) {
-            return res.status(400).json({ error: 'Missing walletAddress parameter.' });
-        }
-
-        const transactions = await Transaction.find({
-            $or: [
-                { customerWalletAddress: walletAddress.toLowerCase() },
-                { sellerWalletAddress: walletAddress.toLowerCase() }
-            ]
-        }).sort({ transactionDate: -1 });
-
-        res.json(transactions);
-    } catch (err) {
-        console.error('Error fetching user transactions:', err.message);
-        res.status(500).json({ error: 'Failed to fetch user transactions.' });
-    }
-});
+/*
+app.get('/transactions', ...); 
+app.get('/transactions/user/:walletAddress', ...); 
+app.post('/transactions', ...);
+*/
 
 app.post('/upload-json-to-pinata', async (req, res) => {
     try {
@@ -82,33 +58,6 @@ app.post('/upload-json-to-pinata', async (req, res) => {
     }
 });
 
-app.post('/transactions', async (req, res) => {
-    try {
-        const { orderId, customerWalletAddress, sellerWalletAddress, items, totalAmountETH, blockchainStatus } = req.body;
-
-        if (!orderId || !customerWalletAddress || !items || !totalAmountETH || !blockchainStatus) {
-            return res.status(400).json({ error: 'Missing required transaction data.' });
-        }
-
-        const newTransaction = new Transaction({
-            orderId,
-            customerWalletAddress: customerWalletAddress.toLowerCase(),
-            sellerWalletAddress: sellerWalletAddress.toLowerCase(),
-            items,
-            totalAmountETH,
-            blockchainStatus,
-        });
-
-        await newTransaction.save();
-        res.status(201).json({ message: 'Transaction saved successfully', transaction: newTransaction });
-    } catch (error) {
-        console.error('Error saving transaction:', error.message);
-        if (error.code === 11000) {
-            return res.status(409).json({ error: 'Transaction with this orderId already exists.' });
-        }
-        res.status(500).json({ error: 'Failed to save transaction.' });
-    }
-});
-
 module.exports = app;
+
 module.exports.handler = serverless(app);
