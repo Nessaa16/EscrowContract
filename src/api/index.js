@@ -24,12 +24,13 @@ if (mongoose.connection.readyState === 0) {
     .catch((err) => console.error('MongoDB error:', err));
 }
 
-app.get('/', async (req, res) => {
+// New route for fetching transaction list
+app.get('/transactions-list', async (req, res) => {
   try {
-    const escrows = await Escrow.find();
-    res.json(escrows);
+    const transactions = await Transaction.find(); // Fetch from Transaction model
+    res.json(transactions);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch data' });
+    res.status(500).json({ error: 'Failed to fetch transaction data' });
   }
 });
 
