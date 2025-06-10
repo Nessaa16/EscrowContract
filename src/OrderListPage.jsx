@@ -200,151 +200,147 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
     };
 
     // FIXED: Enhanced NFT minting with proper customer transfer
-    // FIXED: Enhanced NFT minting with proper customer transfer
-const handleSendReceipt = async () => {
-    if (!currentOrderForReceipt || !receiptFile) {
-        setModalMessage("Order data or receipt file missing.");
-        setModalType('error');
+    const handleSendReceipt = async () => {
+        if (!currentOrderForReceipt || !receiptFile) {
+            setModalMessage("Order data or receipt file missing.");
+            setModalType('error');
+            setShowModal(true);
+            return;
+        }
+
+        setIsSendingReceipt(true);
+        setModalMessage("Uploading file to Pinata IPFS...");
+        setModalType('info');
         setShowModal(true);
-        return;
-    }
 
-    setIsSendingReceipt(true);
-    setModalMessage("Uploading file to Pinata IPFS...");
-    setModalType('info');
-    setShowModal(true);
-
-    let nftMetadata;
-    try {
+        let nftMetadata;
         try {
-            console.log("Starting file upload to Pinata...");
-            console.log("Pinata object:", pinata);
-            console.log("File to upload:", receiptFile);
+            try {
+                console.log("Starting file upload to Pinata...");
+                console.log("Pinata object:", pinata);
+                console.log("File to upload:", receiptFile);
 
-            if (!pinata || !pinata.upload || typeof pinata.upload.public.file !== 'function') {
-                throw new Error("Pinata is not properly initialized. Check your connect.js export and ensure pinata.upload.public.file is available.");
+                // Check if pinata is properly imported and has the upload.public.file method
+                if (!pinata || !pinata.upload || typeof pinata.upload.public.file !== 'function') {
+                    throw new Error("Pinata is not properly initialized. Check your connect.js export and ensure pinata.upload.public.file is available.");
+                }
+
+                // Upload file directly using the NEW SDK's method
+                const uploadResult = await pinata.upload.public.file(receiptFile);
+                const hash = "https://gateway.pinata.cloud/ipfs/" + uploadResult.cid;
+                console.log("Image uploaded to IPFS:", hash);
+
+                // Create and upload NFT metadata with enhanced properties for MetaMask compatibility
+                const metadata = {
+                    name: `Receipt for Order ${currentOrderForReceipt.orderId}`,
+                    description: description || `Delivery receipt for order ${currentOrderForReceipt.orderId}`,
+                    image: hash,
+                    // Enhanced metadata for better NFT display
+                    external_url: hash,
+                    attributes: [
+                        {
+                            trait_type: "Order ID",
+                            value: currentOrderForReceipt.orderId
+                        },
+                        {
+                            trait_type: "Order Fee", 
+                            value: `${currentOrderForReceipt.totalAmountETH} ETH`
+                        },
+                        {
+                            trait_type: "Seller",
+                            value: currentOrderForReceipt.sellerWalletAddress
+                        },
+                        {
+                            trait_type: "Customer",
+                            value: currentOrderForReceipt.customerWalletAddress
+                        },
+                        {
+                            trait_type: "Upload Date",
+                            value: new Date().toISOString()
+                        }
+                    ],
+                    // Additional properties for marketplace compatibility
+                    seller_fee_basis_points: 0,
+                    fee_recipient: currentOrderForReceipt.sellerWalletAddress
+                };
+
+                // Upload metadata directly using the NEW SDK's method
+                nftMetadata = await pinata.upload.public.json(metadata);
+                console.log("Metadata uploaded to IPFS, Hash:", nftMetadata.cid);
+
+            } catch (error) {
+                console.error("Pinata upload error:", error);
+                throw new Error(`Failed to upload to Pinata: ${error.message || error.toString()}`);
             }
 
-            // --- REMOVE THE FILEREADER AND BUFFER.FROM CONVERSION ---
-            // const V = new FileReader;
-            // V.readAsArrayBuffer(receiptFile);
-            // V.onloadend = async () => {
-            // const ot = Buffer.from(V.result);
-            // const Jt = { orderId: currentOrderForReceipt.orderId, fileName: receiptFile.name, fileType: receiptFile.type, fileData: ot.toString("base64") };
-            // const W = await P3(Jt); // Assuming P3 is your backend upload function
-            // const U = `https://gateway.pinata.cloud/ipfs/${W}`;
+            setModalMessage("File uploaded to IPFS. Sending transaction to blockchain...");
+            setModalType('info');
 
-            // --- DIRECTLY USE receiptFile FOR PINATA UPLOAD ---
-            const uploadResult = await pinata.upload.public.file(receiptFile);
-            const hash = "https://gateway.pinata.cloud/ipfs/" + uploadResult.cid;
-            console.log("Image uploaded to IPFS:", hash);
+            // FIXED: Use a more unique tokenId to avoid conflicts
+            const tokenId = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+            const metadataUri = `https://gateway.pinata.cloud/ipfs/${nftMetadata.cid}`;
 
-            // Create and upload NFT metadata with enhanced properties for MetaMask compatibility
-            const metadata = {
-                name: `Receipt for Order ${currentOrderForReceipt.orderId}`,
-                description: description || `Delivery receipt for order ${currentOrderForReceipt.orderId}`,
-                image: hash,
-                external_url: hash,
-                attributes: [
-                    {
-                        trait_type: "Order ID",
-                        value: currentOrderForReceipt.orderId
-                    },
-                    {
-                        trait_type: "Order Fee",
-                        value: `${currentOrderForReceipt.totalAmountETH} ETH`
-                    },
-                    {
-                        trait_type: "Seller",
-                        value: currentOrderForReceipt.sellerWalletAddress
-                    },
-                    {
-                        trait_type: "Customer",
-                        value: currentOrderForReceipt.customerWalletAddress
-                    },
-                    {
-                        trait_type: "Upload Date",
-                        value: new Date().toISOString()
-                    }
-                ],
-                seller_fee_basis_points: 0,
-                fee_recipient: currentOrderForReceipt.sellerWalletAddress
-            };
-
-            nftMetadata = await pinata.upload.public.json(metadata);
-            console.log("Metadata uploaded to IPFS, Hash:", nftMetadata.cid);
-
-        } catch (error) {
-            console.error("Pinata upload error:", error);
-            throw new Error(`Failed to upload to Pinata: ${error.message || error.toString()}`);
-        }
-
-        setModalMessage("File uploaded to IPFS. Sending transaction to blockchain...");
-        setModalType('info');
-
-        const tokenId = Date.now().toString() + Math.floor(Math.random() * 10000).toString();
-        const metadataUri = `https://gateway.pinata.cloud/ipfs/${nftMetadata.cid}`;
-
-        console.log("Calling deliverOrder with:", {
-            orderId: currentOrderForReceipt.orderId,
-            tokenId: tokenId,
-            metadataUri: metadataUri,
-            customer: currentOrderForReceipt.customerWalletAddress
-        });
-
-        const tx = await deliverOrder(
-            currentOrderForReceipt.orderId,
-            tokenId,
-            metadataUri,
-            currentOrderForReceipt.customerWalletAddress
-        );
-
-        console.log("Transaction sent:", tx.hash);
-        await tx.wait();
-        console.log("Blockchain transaction confirmed.");
-
-        setModalMessage("Blockchain transaction confirmed. Updating database status...");
-        setModalType('info');
-
-        try {
-            const updateResponse = await updateOrderStatusBackend(currentOrderForReceipt.orderId, {
-                blockchainStatus: 'IN_DELIVERY',
-                uri: metadataUri,
+            console.log("Calling deliverOrder with:", {
+                orderId: currentOrderForReceipt.orderId,
                 tokenId: tokenId,
-                shippedAt: new Date().toISOString(),
-                shippedBy: wallet
+                metadataUri: metadataUri,
+                customer: currentOrderForReceipt.customerWalletAddress
             });
 
-            console.log("Database update response:", updateResponse);
+            // FIXED: Enhanced deliverOrder call with customer address for proper NFT transfer
+            const tx = await deliverOrder(
+                currentOrderForReceipt.orderId, 
+                tokenId, 
+                metadataUri,
+                currentOrderForReceipt.customerWalletAddress // Pass customer address for NFT transfer
+            );
+            
+            console.log("Transaction sent:", tx.hash);
+            await tx.wait();
+            console.log("Blockchain transaction confirmed.");
 
-            setModalMessage(`Receipt NFT minted and sent successfully! TokenID: ${tokenId}. Check your MetaMask NFT collection.`);
-            setModalType('success');
+            setModalMessage("Blockchain transaction confirmed. Updating database status...");
+            setModalType('info');
 
-            setTimeout(() => {
-                setModalMessage(`NFT Receipt created! It may take a few minutes to appear in MetaMask. TokenID: ${tokenId}`);
-                setModalType('info');
-                setShowModal(true);
-            }, 3000);
+            try {
+                const updateResponse = await updateOrderStatusBackend(currentOrderForReceipt.orderId, {
+                    blockchainStatus: 'IN_DELIVERY',
+                    uri: metadataUri,
+                    tokenId: tokenId, // Store tokenId for reference
+                    shippedAt: new Date().toISOString(),
+                    shippedBy: wallet
+                });
 
-        } catch (dbError) {
-            console.error("Database update failed:", dbError);
-            setModalMessage(`Receipt NFT minted but database update failed: ${dbError.message}. Please refresh to see current status.`);
-            setModalType('warning');
+                console.log("Database update response:", updateResponse);
+
+                setModalMessage(`Receipt NFT minted and sent successfully! TokenID: ${tokenId}. Check your MetaMask NFT collection.`);
+                setModalType('success');
+
+                // FIXED: Add a note about NFT visibility
+                setTimeout(() => {
+                    setModalMessage(`NFT Receipt created! It may take a few minutes to appear in MetaMask. TokenID: ${tokenId}`);
+                    setModalType('info');
+                    setShowModal(true);
+                }, 3000);
+
+            } catch (dbError) {
+                console.error("Database update failed:", dbError);
+                setModalMessage(`Receipt NFT minted but database update failed: ${dbError.message}. Please refresh to see current status.`);
+                setModalType('warning');
+            }
+
+        } catch (error) {
+            console.error("An error occurred during receipt handling:", error);
+            setModalMessage(`Failed to send receipt: ${error.message || error.toString()}`);
+            setModalType('error');
+        } finally {
+            setIsSendingReceipt(false);
+            setShowModal(true);
+
+            handleCloseSendReceiptModal();
+            await fetchAndFilterOrders();
         }
-
-    } catch (error) {
-        console.error("An error occurred during receipt handling:", error);
-        setModalMessage(`Failed to send receipt: ${error.message || error.toString()}`);
-        setModalType('error');
-    } finally {
-        setIsSendingReceipt(false);
-        setShowModal(true);
-
-        handleCloseSendReceiptModal();
-        await fetchAndFilterOrders();
-    }
-};
-
+    };
 
     return (
         <div className="container mx-auto p-8 bg-white rounded-2xl shadow-xl min-h-[500px]">
