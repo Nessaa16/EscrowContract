@@ -221,12 +221,20 @@ const handleSendReceipt = async () => {
             console.log("Pinata object:", pinata);
             console.log("File to upload:", receiptFile);
 
-            // Check if pinata is properly imported and has the upload.public.file method
             if (!pinata || !pinata.upload || typeof pinata.upload.public.file !== 'function') {
                 throw new Error("Pinata is not properly initialized. Check your connect.js export and ensure pinata.upload.public.file is available.");
             }
 
-            // Upload file directly using the NEW SDK's method
+            // --- REMOVE THE FILEREADER AND BUFFER.FROM CONVERSION ---
+            // const V = new FileReader;
+            // V.readAsArrayBuffer(receiptFile);
+            // V.onloadend = async () => {
+            // const ot = Buffer.from(V.result);
+            // const Jt = { orderId: currentOrderForReceipt.orderId, fileName: receiptFile.name, fileType: receiptFile.type, fileData: ot.toString("base64") };
+            // const W = await P3(Jt); // Assuming P3 is your backend upload function
+            // const U = `https://gateway.pinata.cloud/ipfs/${W}`;
+
+            // --- DIRECTLY USE receiptFile FOR PINATA UPLOAD ---
             const uploadResult = await pinata.upload.public.file(receiptFile);
             const hash = "https://gateway.pinata.cloud/ipfs/" + uploadResult.cid;
             console.log("Image uploaded to IPFS:", hash);
@@ -236,7 +244,6 @@ const handleSendReceipt = async () => {
                 name: `Receipt for Order ${currentOrderForReceipt.orderId}`,
                 description: description || `Delivery receipt for order ${currentOrderForReceipt.orderId}`,
                 image: hash,
-                // Enhanced metadata for better NFT display
                 external_url: hash,
                 attributes: [
                     {
@@ -244,7 +251,7 @@ const handleSendReceipt = async () => {
                         value: currentOrderForReceipt.orderId
                     },
                     {
-                        trait_type: "Order Fee", 
+                        trait_type: "Order Fee",
                         value: `${currentOrderForReceipt.totalAmountETH} ETH`
                     },
                     {
@@ -260,12 +267,10 @@ const handleSendReceipt = async () => {
                         value: new Date().toISOString()
                     }
                 ],
-                // Additional properties for marketplace compatibility
                 seller_fee_basis_points: 0,
                 fee_recipient: currentOrderForReceipt.sellerWalletAddress
             };
 
-            // Upload metadata directly using the NEW SDK's method
             nftMetadata = await pinata.upload.public.json(metadata);
             console.log("Metadata uploaded to IPFS, Hash:", nftMetadata.cid);
 
@@ -277,7 +282,6 @@ const handleSendReceipt = async () => {
         setModalMessage("File uploaded to IPFS. Sending transaction to blockchain...");
         setModalType('info');
 
-        // FIXED: Generate a pure numeric tokenId that can be converted to BigInt
         const tokenId = Date.now().toString() + Math.floor(Math.random() * 10000).toString();
         const metadataUri = `https://gateway.pinata.cloud/ipfs/${nftMetadata.cid}`;
 
@@ -288,14 +292,13 @@ const handleSendReceipt = async () => {
             customer: currentOrderForReceipt.customerWalletAddress
         });
 
-        // FIXED: Enhanced deliverOrder call with customer address for proper NFT transfer
         const tx = await deliverOrder(
-            currentOrderForReceipt.orderId, 
-            tokenId, 
+            currentOrderForReceipt.orderId,
+            tokenId,
             metadataUri,
-            currentOrderForReceipt.customerWalletAddress // Pass customer address for NFT transfer
+            currentOrderForReceipt.customerWalletAddress
         );
-        
+
         console.log("Transaction sent:", tx.hash);
         await tx.wait();
         console.log("Blockchain transaction confirmed.");
@@ -307,7 +310,7 @@ const handleSendReceipt = async () => {
             const updateResponse = await updateOrderStatusBackend(currentOrderForReceipt.orderId, {
                 blockchainStatus: 'IN_DELIVERY',
                 uri: metadataUri,
-                tokenId: tokenId, // Store tokenId for reference
+                tokenId: tokenId,
                 shippedAt: new Date().toISOString(),
                 shippedBy: wallet
             });
@@ -317,7 +320,6 @@ const handleSendReceipt = async () => {
             setModalMessage(`Receipt NFT minted and sent successfully! TokenID: ${tokenId}. Check your MetaMask NFT collection.`);
             setModalType('success');
 
-            // FIXED: Add a note about NFT visibility
             setTimeout(() => {
                 setModalMessage(`NFT Receipt created! It may take a few minutes to appear in MetaMask. TokenID: ${tokenId}`);
                 setModalType('info');
@@ -342,6 +344,7 @@ const handleSendReceipt = async () => {
         await fetchAndFilterOrders();
     }
 };
+
 
     return (
         <div className="container mx-auto p-8 bg-white rounded-2xl shadow-xl min-h-[500px]">
