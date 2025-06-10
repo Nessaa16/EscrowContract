@@ -1,18 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import * as ethers from "ethers";
-import { BrowserProvider } from "ethers"; 
-
+import { ethers, BrowserProvider } from "ethers"; // Keep ethers for utility functions like formatEther
 
 import {
     connectWallet,
     uploadMetadataToPinata,
-    getEscrow,
+    getEscrow, // This still fetches from blockchain directly
     deliverOrder,
     confirmOrderDelivered,
     releaseToSeller,
-    cancelTransactionBlockchain,
-    cancelTransactionBackend,
-    fetchTransactionsFromBackend
+    cancelTransactionBlockchain, // Menggunakan nama yang lebih spesifik untuk blockchain
+    cancelTransactionBackend,    // Fungsi baru untuk memanggil API backend
+    fetchTransactionsFromBackend // Import the new function
 } from '/src/connect.js';
 
 /**
@@ -26,11 +24,13 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
     const [sellerOrders, setSellerOrders] = useState([]);
     const [customerOrders, setCustomerOrders] = useState([]);
 
+    // State for receipt submission pop-up
     const [showReceiptInputModal, setShowReceiptInputModal] = useState(false);
     const [currentOrderForReceipt, setCurrentOrderForReceipt] = useState(null);
     const [receiptFile, setReceiptFile] = useState(null);
     const [isSendingReceipt, setIsSendingReceipt] = useState(false);
 
+    // Function to close the modal managed by App.jsx
     const closeModal = () => {
         setShowModal(false);
         setModalMessage('');
@@ -110,7 +110,6 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
         }
     };
 
-
     const handleReleaseToSeller = async (orderId) => {
         setIsLoadingOrders(true);
         setModalMessage("Releasing funds to seller on blockchain...");
@@ -137,8 +136,6 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
         setModalMessage("Cancelling transaction on blockchain and updating database...");
         setModalType('info');
         setShowModal(true);
-        let nft
-        
         try {
             // 1. Call smart contract to cancel the transaction on blockchain
             const tx = await cancelTransactionBlockchain(orderId);
@@ -146,6 +143,9 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
             console.log("Transaction cancelled on blockchain for orderId:", orderId);
 
             // 2. Call backend API to update/delete transaction in MongoDB
+            // You can decide here if you want to delete it completely (true) or just update status (false)
+            // For a "cancel" button, typically you just update status and keep for audit trail.
+            // If you want to delete from DB, pass `true` as the second argument.
             const backendResponse = await cancelTransactionBackend(orderId, true, "User cancelled order from frontend");
             console.log("Backend response for cancellation:", backendResponse);
 
@@ -192,42 +192,52 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
         setShowModal(true);
 
         try {
-             // Mengunggah file ke Pinata
-            try {
-                const hash = "https://gateway.pinata.cloud/ipfs/" + (await pinata.upload.public.file(receiptFile)).cid; // Unggah ke Pinata
-                console.log(hash)
-                nft = await pinata.upload.public.json({
-                    name: currentOrderForReceipt.id,
-                    image: hash,
-                    description: description,
-                    orderFee: currentOrderForReceipt.orderFee + " ETH",
-                    seller: currentOrderForReceipt.seller,
-                });
-                const tokenId = Math.floor(Date.now() / 1000); // tokenId bisa berupa timestamp atau ID unik lainnya
-                const tx = await deliverOrder(currentOrderForReceipt.id, tokenId, `https://gateway.pinata.cloud/ipfs/${nft.cid}`);
-                await tx.wait(); // Tunggu transaksi dikonfirmasi
-                console.log(nft.cid)
+            const reader = new FileReader();
+            reader.readAsArrayBuffer(receiptFile); // Read file as ArrayBuffer
 
-            } catch (error) {
-                console.log(error)
-            }
+            reader.onloadend = async () => {
+                const buffer = Buffer.from(reader.result);
+                const metadata = {
+                    orderId: currentOrderForReceipt.orderId, // Use orderId from backend Transaction model
+                    fileName: receiptFile.name,
+                    fileType: receiptFile.type,
+                    fileData: buffer.toString('base64') // Convert buffer to base64
+                };
 
-            setModalMessage("File uploaded to IPFS. Sending transaction to blockchain..."); // Pesan baru
-            setModalType('info');
-            // setShowModal(true); // Tidak perlu dipanggil lagi karena sudah true
+                const ipfsHash = await uploadMetadataToPinata(metadata);
+                const hashUrl = `https://gateway.pinata.cloud/ipfs/${ipfsHash}`;
+                console.log("IPFS Hash (from backend):", ipfsHash);
+                console.log("Full IPFS URL:", hashUrl);
 
-            setModalMessage(`Receipt sent successfully for Order ID: ${currentOrderForReceipt.id}! Status updated.`);
-            setModalType('success');
-            handleCloseSendReceiptModal(); // Tutup modal input resi
-            const transactions = await fetchTransactionsFromBackend(); 
-            setSellerOrders(transactions)
+
+                setModalMessage("File uploaded to IPFS. Sending transaction to blockchain...");
+                setModalType('info');
+
+                // For deliverOrder, the tokenId is important. Ensure it's unique.
+                // You might store this tokenId in your MongoDB Transaction model.
+                // For now, generating a simple unique ID.
+                // Assuming currentOrderForReceipt.tokenId might come from blockchain or is a new unique number.
+                const tokenId = currentOrderForReceipt.tokenId || Math.floor(Date.now() / 1000); // Using existing tokenId or generating new
+                const tx = await deliverOrder(currentOrderForReceipt.orderId, tokenId, hashUrl); // Use orderId from backend
+                await tx.wait();
+
+                setModalMessage(`Receipt sent successfully for Order ID: ${currentOrderForReceipt.orderId}! Status updated.`);
+                setModalType('success');
+                handleCloseSendReceiptModal();
+                await fetchAndFilterOrders(); // Re-fetch orders from MongoDB to update status
+            };
+
+            reader.onerror = (error) => {
+                throw new Error("Error reading file: " + error.target.error);
+            };
+
         } catch (error) {
             console.error("Failed to send receipt:", error);
             setModalMessage(`Failed to send receipt: ${error.message || error.toString()}`);
             setModalType('error');
         } finally {
             setIsSendingReceipt(false);
-            setShowModal(true); // Pastikan modal tetap tampil dengan status akhir
+            setShowModal(true);
         }
     };
 
@@ -318,7 +328,7 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
 
                     {/* Buyer Orders Section */}
                     <div>
-                        <h3 className="2xl font-bold text-gray-800 mb-4 border-b-2 pb-2 border-blue-200">Order Anda Sebagai Pembeli ({customerOrders.length})</h3>
+                        <h3 className="text-2xl font-bold text-gray-800 mb-4 border-b-2 pb-2 border-blue-200">Order Anda Sebagai Pembeli ({customerOrders.length})</h3>
                         {customerOrders.length === 0 ? (
                             <p className="text-gray-500">Tidak ada order di mana Anda sebagai pembeli.</p>
                         ) : (
@@ -365,9 +375,9 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                                         {order.blockchainStatus === 'AWAITING_PAYMENT' && (
                                             <p className="text-yellow-500 text-sm mt-2">Menunggu pembayaran Anda. (Pembayaran dilakukan di halaman checkout)</p>
                                         )}
-                                           {order.blockchainStatus === 'COMPLETE' && order.uri && (
-                                                <p className="text-green-600 text-sm mt-2">Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
-                                            )}
+                                         {order.blockchainStatus === 'COMPLETE' && order.uri && (
+                                            <p className="text-green-600 text-sm mt-2">Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
+                                        )}
                                         {order.blockchainStatus !== 'CANCELED' && order.blockchainStatus !== 'COMPLETE' && (
                                             <button
                                                 onClick={() => handleCancelTransaction(order.orderId)}
@@ -422,28 +432,4 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
     );
 };
 
-const uploadToPinata = async (file) => {
-  const reader = new FileReader();
-
-  reader.onloadend = async () => {
-    const res = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${your_pinata_jwt}`,
-      },
-      body: createFormData(file)
-    });
-
-    const json = await res.json();
-    console.log("Image IPFS Hash:", json.IpfsHash);
-  };
-
-  reader.readAsArrayBuffer(file); 
-};
-
-function createFormData(file) {
-  const formData = new FormData();
-  formData.append("file", file);
-  return formData;
-}
 export default OrderListPage;

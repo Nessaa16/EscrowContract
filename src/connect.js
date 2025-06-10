@@ -74,7 +74,7 @@ async function ethWithoutWallet() {
  * @returns {Promise<any>} Transaction response.
  */
 export async function createEscrow(orderId, customer, orderFee, paymentDeadline) {
-    const contract = await ethContract(); // ethContract already uses window.ethereum
+    const contract = await ethContract(); 
     const tx = await contract.createEscrow(orderId, customer, orderFee, paymentDeadline);
     return tx; 
 }
