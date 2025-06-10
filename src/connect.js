@@ -1,8 +1,14 @@
-import { BrowserProvider, Contract, JsonRpcProvider, ethers } from "ethers";
-import abi from "./abi.json" 
+import { BrowserProvider, Contract, JsonRpcProvider, ethers, formatEther } from "ethers";
+import abi from "./abi.json";
+import { PinataSDK } from "pinata";
 
 const address = "0x5d0EeDC820CDafbEC7bc8458C8ceE8409FDaCC20"; // Your contract address
 const url = "https://ethereum-holesky-rpc.publicnode.com/"; // Holesky RPC URL
+
+export const pinata = new PinataSDK({
+    pinataJwt: import.meta.env.VITE_JWT,       
+    pinataGateway: import.meta.env.VITE_GATEWAY 
+});
 
 /**
  * Function to connect wallet to DApp and get the first account address.
@@ -11,24 +17,20 @@ const url = "https://ethereum-holesky-rpc.publicnode.com/"; // Holesky RPC URL
  */
 export async function connectWallet() {
     try {
-        // Ensure window.ethereum (Web3 wallet provider) is available
         if (!window.ethereum) {
             alert("Please install a Web3 wallet (e.g., MetaMask) to connect!");
             return;
         }
 
-        // Request accounts from the connected wallet
         const accounts = await window.ethereum.request({
             method: "eth_requestAccounts",
         });
 
-        // Check if any accounts are connected
         if (!accounts || accounts.length === 0) {
             alert("No accounts connected! Please connect a wallet!");
             return;
         }
 
-        // Return the first connected account address
         return accounts[0];
     } catch (error) {
         console.error("Error connecting wallet:", error.message);
@@ -40,15 +42,11 @@ export async function connectWallet() {
 
 /**
  * Connects to the contract using the wallet (for signing transactions).
- * This function will internally use window.ethereum.
  * @returns {Promise<Contract>} Ethers.js contract instance connected with the signer.
  */
 async function ethContract() {
-    // Create a BrowserProvider from window.ethereum
     const browser = new BrowserProvider(window.ethereum);
-    // Get the signer (user account) to send transactions
     const user = await browser.getSigner();
-    // Create a Contract instance with contract address, ABI, and signer
     const contract = new Contract(address, abi, user);
     return contract;
 }
@@ -58,9 +56,7 @@ async function ethContract() {
  * @returns {Promise<Contract>} Ethers.js contract instance connected with the provider.
  */
 async function ethWithoutWallet() {
-    // Create a JsonRpcProvider to connect to the blockchain RPC URL
     const browser = new JsonRpcProvider(url);
-    // Create a Contract instance with contract address, ABI, and provider
     const contract = new Contract(address, abi, browser);
     return contract;
 }
@@ -74,7 +70,7 @@ async function ethWithoutWallet() {
  * @returns {Promise<any>} Transaction response.
  */
 export async function createEscrow(orderId, customer, orderFee, paymentDeadline) {
-    const contract = await ethContract(); 
+    const contract = await ethContract();
     const tx = await contract.createEscrow(orderId, customer, orderFee, paymentDeadline);
     return tx; 
 }
@@ -202,40 +198,11 @@ function parseEscrow(data) {
         customer: data.customer,
         seller: data.seller,
         canceledBy: data.canceledBy,
-        orderFee: ethers.formatEther(data.orderFee), 
-        paymentDeadline: Number(data.paymentDeadline), 
+        orderFee: ethers.formatEther(data.orderFee),
+        paymentDeadline: Number(data.paymentDeadline),
         status: statusMap[Number(data.status)],
         fundsDeposited: data.fundsDeposited,
     };
-}
-
-/**
- * Function to upload metadata to Pinata via the backend API.
- * @param {Object} metadata - Metadata object to be uploaded.
- * @returns {Promise<string>} IPFS hash (CID) of the uploaded metadata.
- */
-export async function uploadMetadataToPinata(metadata) {
-    try {
-        const response = await fetch('/api/upload-json-to-pinata', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ jsonContent: metadata }),
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to upload metadata to Pinata via backend');
-        }
-
-        const data = await response.json();
-        return data.IpfsHash; 
-    } catch (error) {
-        console.error("Error uploading metadata to Pinata:", error.message);
-        alert(`Failed to upload metadata: ${error.message}`);
-        throw error; 
-    }
 }
 
 /**
@@ -257,10 +224,39 @@ export async function fetchTransactionsFromBackend() {
         }
 
         const data = await response.json();
-        return data; 
+        return data;
     } catch (error) {
         console.error("Error fetching transactions from backend:", error.message);
         alert(`Failed to fetch transactions: ${error.message}`);
-        throw error; 
+        throw error;
+    }
+}
+
+/**
+ * Sends a request to the backend API to update a transaction's status in the database.
+ * @param {string} orderId - The ID of the order to update.
+ * @param {Object} updateData - An object containing the fields to update (e.g., { blockchainStatus: 'IN_DELIVERY', uri: 'ipfs_uri', shippedAt: 'timestamp' }).
+ * @returns {Promise<Object>} Response from the backend API.
+ */
+export async function updateOrderStatusBackend(orderId, updateData) {
+    try {
+        const response = await fetch(`/api/transactions/${orderId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(updateData),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to update transaction status in database');
+        }
+
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error("Error updating transaction status in backend:", error.message);
+        throw error;
     }
 }

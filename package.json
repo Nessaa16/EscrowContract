@@ -11,17 +11,19 @@
     "nodemon": "^3.1.10",
     "postcss": "^8.5.4",
     "tailwindcss": "^4.1.8",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vite-plugin-node-polyfills": "^0.23.0"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.3.0",
-    "@pinata/sdk": "^2.1.0",
     "@vitejs/plugin-react": "^4.5.1",
+    "buffer": "^6.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "mongodb": "^6.16.0",
     "mongoose": "^8.15.1",
+    "pinata": "^2.4.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.2",

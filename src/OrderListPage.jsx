@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { ethers, BrowserProvider } from "ethers"; // Keep ethers for utility functions like formatEther
+import * as ethers from "ethers";
+import { BrowserProvider } from "ethers";
 
 import {
     connectWallet,
-    uploadMetadataToPinata,
-    getEscrow, // This still fetches from blockchain directly
+    getEscrow,
     deliverOrder,
     confirmOrderDelivered,
     releaseToSeller,
-    cancelTransactionBlockchain, // Menggunakan nama yang lebih spesifik untuk blockchain
-    cancelTransactionBackend,    // Fungsi baru untuk memanggil API backend
-    fetchTransactionsFromBackend // Import the new function
+    cancelTransactionBlockchain,
+    cancelTransactionBackend,
+    fetchTransactionsFromBackend,
+    updateOrderStatusBackend,
+    pinata 
 } from '/src/connect.js';
 
 /**
@@ -19,25 +21,23 @@ import {
  * to display modal notifications.
  */
 const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, setShowModal }) => {
-    const [orders, setOrders] = useState([]); // This will store all fetched transactions from MongoDB
+    const [orders, setOrders] = useState([]);
     const [isLoadingOrders, setIsLoadingOrders] = useState(false);
     const [sellerOrders, setSellerOrders] = useState([]);
     const [customerOrders, setCustomerOrders] = useState([]);
 
-    // State for receipt submission pop-up
     const [showReceiptInputModal, setShowReceiptInputModal] = useState(false);
     const [currentOrderForReceipt, setCurrentOrderForReceipt] = useState(null);
     const [receiptFile, setReceiptFile] = useState(null);
     const [isSendingReceipt, setIsSendingReceipt] = useState(false);
+    const [description, setDescription] = useState("");
 
-    // Function to close the modal managed by App.jsx
     const closeModal = () => {
         setShowModal(false);
         setModalMessage('');
         setModalType('info');
     };
 
-    // Function to load orders from MongoDB backend
     const fetchAndFilterOrders = async () => {
         if (!wallet) {
             setOrders([]);
@@ -52,10 +52,9 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
         setShowModal(true);
 
         try {
-            const fetchedTransactions = await fetchTransactionsFromBackend(); // Fetch from MongoDB backend
+            const fetchedTransactions = await fetchTransactionsFromBackend();
             console.log("Fetched transactions from MongoDB:", fetchedTransactions);
 
-            // Filter transactions based on the connected wallet address
             const filteredSellerOrders = fetchedTransactions.filter(
                 (order) => order.sellerWalletAddress && order.sellerWalletAddress.toLowerCase() === wallet.toLowerCase()
             );
@@ -63,7 +62,7 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                 (order) => order.customerWalletAddress && order.customerWalletAddress.toLowerCase() === wallet.toLowerCase()
             );
 
-            setOrders(fetchedTransactions); // Keep all fetched transactions if needed elsewhere
+            setOrders(fetchedTransactions);
             setSellerOrders(filteredSellerOrders);
             setCustomerOrders(filteredCustomerOrders);
 
@@ -75,19 +74,13 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
             setModalType('error');
         } finally {
             setIsLoadingOrders(false);
-            // Only show modal if there's a message, otherwise it can be hidden
             if (setModalMessage) setShowModal(true);
         }
     };
 
-    // Use this effect to fetch orders from MongoDB when the wallet changes or component mounts
     useEffect(() => {
         fetchAndFilterOrders();
     }, [wallet]);
-
-    // Functions to handle blockchain interactions (confirm, release, cancel)
-    // These functions should call the respective contract functions from connect.js
-    // and then re-fetch orders from the backend to update the UI.
 
     const handleConfirmDelivered = async (orderId) => {
         setIsLoadingOrders(true);
@@ -95,11 +88,27 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
         setModalType('info');
         setShowModal(true);
         try {
+            console.log(`Attempting to confirm delivery for orderId: ${orderId}`);
             const tx = await confirmOrderDelivered(orderId);
+            console.log("Transaction sent:", tx.hash);
             await tx.wait();
+            console.log("Transaction confirmed on blockchain.");
+
             setModalMessage("Order delivery confirmed successfully!");
             setModalType('success');
-            await fetchAndFilterOrders(); // Re-fetch from MongoDB to update status
+
+            // Update backend status after blockchain confirmation
+            console.log("Updating backend status for orderId:", orderId, "to DELIVERED");
+            await updateOrderStatusBackend(orderId, {
+                blockchainStatus: 'DELIVERED',
+                deliveredAt: new Date().toISOString(),
+                confirmedBy: wallet
+            });
+
+            console.log("Calling fetchAndFilterOrders to update UI...");
+            await fetchAndFilterOrders();
+            console.log("UI update process initiated.");
+
         } catch (error) {
             console.error("Failed to confirm order delivery:", error);
             setModalMessage(`Failed to confirm delivery: ${error.message || error.toString()}`);
@@ -107,6 +116,7 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
         } finally {
             setIsLoadingOrders(false);
             setShowModal(true);
+            console.log("Confirmation process finished.");
         }
     };
 
@@ -116,11 +126,27 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
         setModalType('info');
         setShowModal(true);
         try {
+            console.log(`Attempting to release funds for orderId: ${orderId}`);
             const tx = await releaseToSeller(orderId);
+            console.log("Transaction sent:", tx.hash);
             await tx.wait();
+            console.log("Funds released on blockchain.");
+
             setModalMessage("Funds released to seller successfully!");
             setModalType('success');
-            await fetchAndFilterOrders(); // Re-fetch from MongoDB to update status
+
+            // Update backend status after blockchain confirmation
+            console.log("Updating backend status for orderId:", orderId, "to COMPLETE");
+            await updateOrderStatusBackend(orderId, {
+                blockchainStatus: 'COMPLETE',
+                completedAt: new Date().toISOString(),
+                releasedBy: wallet
+            });
+
+            console.log("Calling fetchAndFilterOrders to update UI...");
+            await fetchAndFilterOrders();
+            console.log("UI update process initiated.");
+
         } catch (error) {
             console.error("Failed to release funds to seller:", error);
             setModalMessage(`Failed to release funds: ${error.message || error.toString()}`);
@@ -128,6 +154,7 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
         } finally {
             setIsLoadingOrders(false);
             setShowModal(true);
+            console.log("Release process finished.");
         }
     };
 
@@ -136,22 +163,18 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
         setModalMessage("Cancelling transaction on blockchain and updating database...");
         setModalType('info');
         setShowModal(true);
+        
         try {
-            // 1. Call smart contract to cancel the transaction on blockchain
             const tx = await cancelTransactionBlockchain(orderId);
             await tx.wait();
             console.log("Transaction cancelled on blockchain for orderId:", orderId);
 
-            // 2. Call backend API to update/delete transaction in MongoDB
-            // You can decide here if you want to delete it completely (true) or just update status (false)
-            // For a "cancel" button, typically you just update status and keep for audit trail.
-            // If you want to delete from DB, pass `true` as the second argument.
             const backendResponse = await cancelTransactionBackend(orderId, true, "User cancelled order from frontend");
             console.log("Backend response for cancellation:", backendResponse);
 
             setModalMessage("Transaction cancelled successfully!");
             setModalType('success');
-            await fetchAndFilterOrders(); // Re-fetch from MongoDB to update status
+            await fetchAndFilterOrders();
         } catch (error) {
             console.error("Failed to cancel transaction:", error);
             setModalMessage(`Failed to cancel transaction: ${error.message || error.toString()}`);
@@ -162,85 +185,163 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
         }
     };
 
-
-    // Function to open receipt submission modal
     const handleOpenSendReceiptModal = (order) => {
         setCurrentOrderForReceipt(order);
-        setReceiptFile(null); // Reset input file
+        setReceiptFile(null);
+        setDescription("");
         setShowReceiptInputModal(true);
     };
 
-    // Function to close receipt submission modal
     const handleCloseSendReceiptModal = () => {
         setShowReceiptInputModal(false);
         setCurrentOrderForReceipt(null);
         setReceiptFile(null);
+        setDescription("");
     };
 
-    // Function to send receipt (calls deliverOrder)
-    const handleSendReceipt = async () => {
-        if (!currentOrderForReceipt || !receiptFile) {
-            setModalMessage("Order data or receipt file missing.");
-            setModalType('error');
-            setShowModal(true);
-            return;
-        }
-
-        setIsSendingReceipt(true);
-        setModalMessage("Uploading file to Pinata IPFS via backend...");
-        setModalType('info');
+    // FIXED: Enhanced NFT minting with proper customer transfer
+    // FIXED: Enhanced NFT minting with proper customer transfer
+const handleSendReceipt = async () => {
+    if (!currentOrderForReceipt || !receiptFile) {
+        setModalMessage("Order data or receipt file missing.");
+        setModalType('error');
         setShowModal(true);
+        return;
+    }
 
+    setIsSendingReceipt(true);
+    setModalMessage("Uploading file to Pinata IPFS...");
+    setModalType('info');
+    setShowModal(true);
+
+    let nftMetadata;
+    try {
         try {
-            const reader = new FileReader();
-            reader.readAsArrayBuffer(receiptFile); // Read file as ArrayBuffer
+            console.log("Starting file upload to Pinata...");
+            console.log("Pinata object:", pinata);
+            console.log("File to upload:", receiptFile);
 
-            reader.onloadend = async () => {
-                const buffer = Buffer.from(reader.result);
-                const metadata = {
-                    orderId: currentOrderForReceipt.orderId, // Use orderId from backend Transaction model
-                    fileName: receiptFile.name,
-                    fileType: receiptFile.type,
-                    fileData: buffer.toString('base64') // Convert buffer to base64
-                };
+            // Check if pinata is properly imported and has the upload.public.file method
+            if (!pinata || !pinata.upload || typeof pinata.upload.public.file !== 'function') {
+                throw new Error("Pinata is not properly initialized. Check your connect.js export and ensure pinata.upload.public.file is available.");
+            }
 
-                const ipfsHash = await uploadMetadataToPinata(metadata);
-                const hashUrl = `https://gateway.pinata.cloud/ipfs/${ipfsHash}`;
-                console.log("IPFS Hash (from backend):", ipfsHash);
-                console.log("Full IPFS URL:", hashUrl);
+            // Upload file directly using the NEW SDK's method
+            const uploadResult = await pinata.upload.public.file(receiptFile);
+            const hash = "https://gateway.pinata.cloud/ipfs/" + uploadResult.cid;
+            console.log("Image uploaded to IPFS:", hash);
 
-
-                setModalMessage("File uploaded to IPFS. Sending transaction to blockchain...");
-                setModalType('info');
-
-                // For deliverOrder, the tokenId is important. Ensure it's unique.
-                // You might store this tokenId in your MongoDB Transaction model.
-                // For now, generating a simple unique ID.
-                // Assuming currentOrderForReceipt.tokenId might come from blockchain or is a new unique number.
-                const tokenId = currentOrderForReceipt.tokenId || Math.floor(Date.now() / 1000); // Using existing tokenId or generating new
-                const tx = await deliverOrder(currentOrderForReceipt.orderId, tokenId, hashUrl); // Use orderId from backend
-                await tx.wait();
-
-                setModalMessage(`Receipt sent successfully for Order ID: ${currentOrderForReceipt.orderId}! Status updated.`);
-                setModalType('success');
-                handleCloseSendReceiptModal();
-                await fetchAndFilterOrders(); // Re-fetch orders from MongoDB to update status
+            // Create and upload NFT metadata with enhanced properties for MetaMask compatibility
+            const metadata = {
+                name: `Receipt for Order ${currentOrderForReceipt.orderId}`,
+                description: description || `Delivery receipt for order ${currentOrderForReceipt.orderId}`,
+                image: hash,
+                // Enhanced metadata for better NFT display
+                external_url: hash,
+                attributes: [
+                    {
+                        trait_type: "Order ID",
+                        value: currentOrderForReceipt.orderId
+                    },
+                    {
+                        trait_type: "Order Fee", 
+                        value: `${currentOrderForReceipt.totalAmountETH} ETH`
+                    },
+                    {
+                        trait_type: "Seller",
+                        value: currentOrderForReceipt.sellerWalletAddress
+                    },
+                    {
+                        trait_type: "Customer",
+                        value: currentOrderForReceipt.customerWalletAddress
+                    },
+                    {
+                        trait_type: "Upload Date",
+                        value: new Date().toISOString()
+                    }
+                ],
+                // Additional properties for marketplace compatibility
+                seller_fee_basis_points: 0,
+                fee_recipient: currentOrderForReceipt.sellerWalletAddress
             };
 
-            reader.onerror = (error) => {
-                throw new Error("Error reading file: " + error.target.error);
-            };
+            // Upload metadata directly using the NEW SDK's method
+            nftMetadata = await pinata.upload.public.json(metadata);
+            console.log("Metadata uploaded to IPFS, Hash:", nftMetadata.cid);
 
         } catch (error) {
-            console.error("Failed to send receipt:", error);
-            setModalMessage(`Failed to send receipt: ${error.message || error.toString()}`);
-            setModalType('error');
-        } finally {
-            setIsSendingReceipt(false);
-            setShowModal(true);
+            console.error("Pinata upload error:", error);
+            throw new Error(`Failed to upload to Pinata: ${error.message || error.toString()}`);
         }
-    };
 
+        setModalMessage("File uploaded to IPFS. Sending transaction to blockchain...");
+        setModalType('info');
+
+        // FIXED: Generate a pure numeric tokenId that can be converted to BigInt
+        const tokenId = Date.now().toString() + Math.floor(Math.random() * 10000).toString();
+        const metadataUri = `https://gateway.pinata.cloud/ipfs/${nftMetadata.cid}`;
+
+        console.log("Calling deliverOrder with:", {
+            orderId: currentOrderForReceipt.orderId,
+            tokenId: tokenId,
+            metadataUri: metadataUri,
+            customer: currentOrderForReceipt.customerWalletAddress
+        });
+
+        // FIXED: Enhanced deliverOrder call with customer address for proper NFT transfer
+        const tx = await deliverOrder(
+            currentOrderForReceipt.orderId, 
+            tokenId, 
+            metadataUri,
+            currentOrderForReceipt.customerWalletAddress // Pass customer address for NFT transfer
+        );
+        
+        console.log("Transaction sent:", tx.hash);
+        await tx.wait();
+        console.log("Blockchain transaction confirmed.");
+
+        setModalMessage("Blockchain transaction confirmed. Updating database status...");
+        setModalType('info');
+
+        try {
+            const updateResponse = await updateOrderStatusBackend(currentOrderForReceipt.orderId, {
+                blockchainStatus: 'IN_DELIVERY',
+                uri: metadataUri,
+                tokenId: tokenId, // Store tokenId for reference
+                shippedAt: new Date().toISOString(),
+                shippedBy: wallet
+            });
+
+            console.log("Database update response:", updateResponse);
+
+            setModalMessage(`Receipt NFT minted and sent successfully! TokenID: ${tokenId}. Check your MetaMask NFT collection.`);
+            setModalType('success');
+
+            // FIXED: Add a note about NFT visibility
+            setTimeout(() => {
+                setModalMessage(`NFT Receipt created! It may take a few minutes to appear in MetaMask. TokenID: ${tokenId}`);
+                setModalType('info');
+                setShowModal(true);
+            }, 3000);
+
+        } catch (dbError) {
+            console.error("Database update failed:", dbError);
+            setModalMessage(`Receipt NFT minted but database update failed: ${dbError.message}. Please refresh to see current status.`);
+            setModalType('warning');
+        }
+
+    } catch (error) {
+        console.error("An error occurred during receipt handling:", error);
+        setModalMessage(`Failed to send receipt: ${error.message || error.toString()}`);
+        setModalType('error');
+    } finally {
+        setIsSendingReceipt(false);
+        setShowModal(true);
+
+        handleCloseSendReceiptModal();
+        await fetchAndFilterOrders();
+    }
+};
 
     return (
         <div className="container mx-auto p-8 bg-white rounded-2xl shadow-xl min-h-[500px]">
@@ -252,7 +353,7 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                 </p>
             ) : isLoadingOrders ? (
                 <div className="text-center py-8">
-                    <p className="text-gray-60-text-lg">Memuat daftar transaksi...</p>
+                    <p className="text-gray-600 text-lg">Memuat daftar transaksi...</p>
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mt-4"></div>
                 </div>
             ) : orders.length === 0 ? (
@@ -296,11 +397,16 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                                                 className="mt-4 w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                                                 disabled={isSendingReceipt || isLoadingOrders}
                                             >
-                                                {isSendingReceipt ? 'Sending...' : 'Kirim Resi'}
+                                                {isSendingReceipt ? 'Sending...' : 'Kirim Resi NFT'}
                                             </button>
                                         )}
                                         {order.blockchainStatus === 'IN_DELIVERY' && (
-                                            <p className="text-blue-500 text-sm mt-2">Menunggu konfirmasi dari pelanggan.</p>
+                                            <div className="mt-2">
+                                                <p className="text-blue-500 text-sm">Menunggu konfirmasi dari pelanggan.</p>
+                                                {order.tokenId && (
+                                                    <p className="text-green-600 text-sm">NFT TokenID: {order.tokenId}</p>
+                                                )}
+                                            </div>
                                         )}
                                         {order.blockchainStatus === 'DELIVERED' && (
                                             <p className="text-green-500 text-sm mt-2">Menunggu pelepasan dana dari pelanggan.</p>
@@ -309,13 +415,18 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                                             <p className="text-yellow-500 text-sm mt-2">Menunggu pembayaran dari pelanggan.</p>
                                         )}
                                         {order.blockchainStatus === 'COMPLETE' && order.uri && (
-                                            <p className="text-green-600 text-sm mt-2">Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
+                                            <div className="mt-2">
+                                                <p className="text-green-600 text-sm">NFT Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
+                                                {order.tokenId && (
+                                                    <p className="text-green-600 text-sm">TokenID: {order.tokenId}</p>
+                                                )}
+                                            </div>
                                         )}
                                         {order.blockchainStatus !== 'CANCELED' && order.blockchainStatus !== 'COMPLETE' && (
                                             <button
                                                 onClick={() => handleCancelTransaction(order.orderId)}
                                                 className="mt-2 w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                disabled={isSendingReceipt || isLoadingOrders}
+                                                disabled={isLoadingOrders}
                                             >
                                                 Batalkan Transaksi
                                             </button>
@@ -355,13 +466,18 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                                         </ul>
                                         <p className="text-gray-700">Transaction Date: <span className="font-medium">{new Date(order.transactionDate).toLocaleString()}</span></p>
                                         {order.blockchainStatus === 'IN_DELIVERY' && (
-                                            <button
-                                                onClick={() => handleConfirmDelivered(order.orderId)}
-                                                className="mt-4 w-full bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                disabled={isLoadingOrders}
-                                            >
-                                                Konfirmasi Diterima
-                                            </button>
+                                            <div className="mt-4">
+                                                <button
+                                                    onClick={() => handleConfirmDelivered(order.orderId)}
+                                                    className="w-full bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    disabled={isLoadingOrders}
+                                                >
+                                                    Konfirmasi Diterima
+                                                </button>
+                                                {order.tokenId && (
+                                                    <p className="text-green-600 text-sm mt-2">NFT Receipt TokenID: {order.tokenId} (Check MetaMask NFTs)</p>
+                                                )}
+                                            </div>
                                         )}
                                         {order.blockchainStatus === 'DELIVERED' && (
                                             <button
@@ -375,8 +491,13 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                                         {order.blockchainStatus === 'AWAITING_PAYMENT' && (
                                             <p className="text-yellow-500 text-sm mt-2">Menunggu pembayaran Anda. (Pembayaran dilakukan di halaman checkout)</p>
                                         )}
-                                         {order.blockchainStatus === 'COMPLETE' && order.uri && (
-                                            <p className="text-green-600 text-sm mt-2">Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
+                                        {order.blockchainStatus === 'COMPLETE' && order.uri && (
+                                            <div className="mt-2">
+                                                <p className="text-green-600 text-sm">NFT Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
+                                                {order.tokenId && (
+                                                    <p className="text-green-600 text-sm">Your NFT TokenID: {order.tokenId} (Check MetaMask NFTs)</p>
+                                                )}
+                                            </div>
                                         )}
                                         {order.blockchainStatus !== 'CANCELED' && order.blockchainStatus !== 'COMPLETE' && (
                                             <button
@@ -399,8 +520,8 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
             {showReceiptInputModal && (
                 <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
-                        <h3 className="text-2xl font-bold text-gray-800 mb-4">Kirim Resi untuk Order: <span className="text-blue-600 break-words">{currentOrderForReceipt?.orderId}</span></h3>
-                        <p className="text-gray-700 mb-4">Pilih gambar resi (.jpg, .png, .gif):</p>
+                        <h3 className="text-2xl font-bold text-gray-800 mb-4">Kirim Resi NFT untuk Order: <span className="text-blue-600 break-words">{currentOrderForReceipt?.orderId}</span></h3>
+                        <p className="text-gray-700 mb-4">Pilih gambar resi (.jpg, .png, .gif) - akan dibuat sebagai NFT:</p>
                         <input
                             type="file"
                             accept="image/*"
@@ -408,7 +529,19 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                             className="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             disabled={isSendingReceipt}
                         />
+                        <h4 className="text-lg font-bold text-gray-800 mb-2">Deskripsi NFT</h4>
+                        <input
+                            type="text"
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            placeholder="Deskripsi untuk NFT receipt (opsional)"
+                            className="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            disabled={isSendingReceipt}
+                        />
                         {receiptFile && <p className="text-sm text-gray-600 mb-4">File terpilih: {receiptFile.name}</p>}
+                        <div className="bg-blue-50 p-3 rounded-lg mb-4">
+                            <p className="text-sm text-blue-700">ℹ️ NFT akan dikirim ke alamat customer: <span className="font-mono text-xs">{currentOrderForReceipt?.customerWalletAddress}</span></p>
+                        </div>
                         <div className="flex justify-end gap-4">
                             <button
                                 onClick={handleCloseSendReceiptModal}
@@ -422,7 +555,7 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                                 className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                                 disabled={isSendingReceipt || !receiptFile}
                             >
-                                {isSendingReceipt ? 'Mengirim...' : 'Kirim Resi'}
+                                {isSendingReceipt ? 'Minting NFT...' : 'Mint & Kirim NFT'}
                             </button>
                         </div>
                     </div>
