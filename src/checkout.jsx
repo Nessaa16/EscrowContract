@@ -57,10 +57,10 @@ const CheckoutPage = ({
         setShowModal(true);
 
         try {
-            // Dapatkan alamat signer yang sebenarnya dari window.ethereum
-            const provider = new BrowserProvider(window.ethereum);
-            const signer = await provider.getSigner();
-            const signerAddress = await signer.getAddress(); // Alamat yang akan menandatangani transaksi
+            // // Dapatkan alamat signer yang sebenarnya dari window.ethereum
+            // const provider = new BrowserProvider(window.ethereum);
+            // const signer = await provider.getSigner();
+            // const signerAddress = await signer.getAddress(); // Alamat yang akan menandatangani transaksi
 
             // Hasilkan ID order unik (misalnya, timestamp + angka acak)
             const orderId = `order_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
@@ -73,7 +73,7 @@ const CheckoutPage = ({
             // Langkah 1: Buat Escrow (mensimulasikan tindakan penjual untuk tujuan demo)
             setModalMessage("Creating escrow on blockchain...");
             // Gunakan signerAddress sebagai customer untuk memastikan konsistensi
-            const createEscrowTx = await createEscrow(orderId, signerAddress, amountInWei, paymentDeadline);
+            const createEscrowTx = await createEscrow(orderId, address, amountInWei, paymentDeadline);
             console.log("Create Escrow Tx:", createEscrowTx);
             await createEscrowTx.wait(); // Pastikan transaksi createEscrow dikonfirmasi
             console.log("Escrow created successfully and confirmed for orderId:", orderId);
@@ -95,7 +95,7 @@ const CheckoutPage = ({
                 // More robust data preparation
                 const transactionData = {
                     orderId: orderId,
-                    customerWalletAddress: signerAddress,
+                    customerWalletAddress: address,
                     sellerWalletAddress: address, 
                     items: cartItems.map(item => ({
                         id: item.id || `item_${Date.now()}_${Math.random()}`, // Add the missing id field

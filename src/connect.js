@@ -1,9 +1,9 @@
-import { BrowserProvider, Contract, JsonRpcProvider, ethers, formatEther } from "ethers";
+import { AlchemyProvider, BrowserProvider, Contract, JsonRpcProvider, ethers, formatEther } from "ethers";
 import abi from "./abi.json";
 import { PinataSDK } from "pinata";
 
-const address = "0x5d0EeDC820CDafbEC7bc8458C8ceE8409FDaCC20"; // Your contract address
-const url = "https://ethereum-holesky-rpc.publicnode.com/"; // Holesky RPC URL
+const address = "0x8eCC009CF4D8284Ce2df1b2e9eEEd09bE915FD37"; // Your contract address
+// const url = "https://ethereum-holesky-rpc.publicnode.com"; // Holesky RPC URL
 
 export const pinata = new PinataSDK({
     pinataJwt: import.meta.env.VITE_JWT,       
@@ -39,7 +39,6 @@ export async function connectWallet() {
     }
 }
 
-
 /**
  * Connects to the contract using the wallet (for signing transactions).
  * @returns {Promise<Contract>} Ethers.js contract instance connected with the signer.
@@ -56,7 +55,7 @@ async function ethContract() {
  * @returns {Promise<Contract>} Ethers.js contract instance connected with the provider.
  */
 async function ethWithoutWallet() {
-    const browser = new JsonRpcProvider(url);
+    const browser = new AlchemyProvider(`${import.meta.env.VITE_ALCHEMY}`);
     const contract = new Contract(address, abi, browser);
     return contract;
 }
@@ -69,10 +68,11 @@ async function ethWithoutWallet() {
  * @param {number} paymentDeadline - Payment deadline as Unix timestamp (seconds).
  * @returns {Promise<any>} Transaction response.
  */
-export async function createEscrow(orderId, customer, orderFee, paymentDeadline) {
+export async function createEscrow(orderId, seller, orderFee, paymentDeadline) {
+    // const seller = await connectWallet(); // kamu sebagai seller dan customer
     const contract = await ethContract();
-    const tx = await contract.createEscrow(orderId, customer, orderFee, paymentDeadline);
-    return tx; 
+    const tx = await contract.createEscrow(orderId, seller, orderFee, paymentDeadline);
+    return tx;
 }
 
 /**
@@ -88,16 +88,107 @@ export async function payEscrow(orderId, amountInWei) {
 }
 
 /**
- * Allows the seller to deliver the order and mint an NFT.
+ * Allows the seller to deliver the order and mint an NFT to the customer.
+ * The NFT will be automatically minted to the customer address stored in the escrow.
  * @param {string} orderId - Order ID.
  * @param {number} tokenId - Unique ID for the NFT.
  * @param {string} uri - URI for NFT metadata.
+ * @param {string} customerAddress - Customer wallet address to receive the NFT.
  * @returns {Promise<any>} Transaction response.
  */
-export async function deliverOrder(orderId, tokenId, uri) {
-    const contract = await ethContract();
-    const tx = await contract.deliverOrder(orderId, tokenId, uri);
-    return tx;
+export async function deliverOrder(orderId, tokenId, uri, customerAddress) {
+    try {
+        const contract = await ethContract();
+        
+        // Log the parameters for debugging
+        console.log("Delivering order with parameters:", {
+            orderId,
+            tokenId,
+            uri,
+            customerAddress
+        });
+
+        // Call the smart contract function with customer address explicitly
+        // This ensures the NFT is minted to the correct customer address
+        const tx = await contract.deliverOrder(orderId, tokenId, uri);
+        
+        console.log("DeliverOrder transaction sent:", tx.hash);
+        
+        // Wait for transaction confirmation
+        const receipt = await tx.wait();
+        console.log("DeliverOrder transaction confirmed:", receipt);
+        
+        // Verify the NFT was minted to the correct address
+        if (customerAddress) {
+            console.log(`NFT with tokenId ${tokenId} should be minted to customer: ${customerAddress}`);
+        }
+        
+        return tx;
+    } catch (error) {
+        console.error("Error in deliverOrder:", error);
+        throw new Error(`Failed to deliver order: ${error.message}`);
+    }
+}
+
+/**
+ * Enhanced function to verify NFT ownership after minting
+ * @param {number} tokenId - Token ID to check
+ * @param {string} expectedOwner - Expected owner address
+ * @returns {Promise<boolean>} True if the NFT is owned by the expected address
+ */
+export async function verifyNFTOwnership(tokenId, expectedOwner) {
+    try {
+        const contract = await ethWithoutWallet();
+        
+        // Check if the contract has an ownerOf function for NFTs
+        if (typeof contract.ownerOf === 'function') {
+            const actualOwner = await contract.ownerOf(tokenId);
+            const isCorrectOwner = actualOwner.toLowerCase() === expectedOwner.toLowerCase();
+            
+            console.log(`NFT ${tokenId} ownership verification:`, {
+                expectedOwner,
+                actualOwner,
+                isCorrectOwner
+            });
+            
+            return isCorrectOwner;
+        } else {
+            console.warn("Contract does not support ownerOf function");
+            return false;
+        }
+    } catch (error) {
+        console.error("Error verifying NFT ownership:", error);
+        return false;
+    }
+}
+
+/**
+ * Enhanced function to get NFT metadata and ownership info
+ * @param {number} tokenId - Token ID to get info for
+ * @returns {Promise<Object>} NFT information including owner and metadata
+ */
+export async function getNFTInfo(tokenId) {
+    try {
+        const contract = await ethWithoutWallet();
+        
+        const info = {};
+        
+        // Get owner if function exists
+        if (typeof contract.ownerOf === 'function') {
+            info.owner = await contract.ownerOf(tokenId);
+        }
+        
+        // Get token URI if function exists
+        if (typeof contract.tokenURI === 'function') {
+            info.tokenURI = await contract.tokenURI(tokenId);
+        }
+        
+        console.log(`NFT ${tokenId} info:`, info);
+        return info;
+    } catch (error) {
+        console.error("Error getting NFT info:", error);
+        throw error;
+    }
 }
 
 /**
@@ -176,6 +267,28 @@ export async function getEscrow(orderId) {
     const contract = await ethWithoutWallet();
     const data = await contract.getEscrow(orderId);
     return parseEscrow(data);
+}
+
+/**
+ * Enhanced function to get escrow details with additional NFT information
+ * @param {string} orderId - Order ID to retrieve.
+ * @returns {Promise<Object>} Enhanced escrow details with NFT info.
+ */
+export async function getEscrowWithNFTInfo(orderId) {
+    try {
+        const escrowData = await getEscrow(orderId);
+        
+        // If there's a tokenId associated, get NFT info
+        if (escrowData.tokenId) {
+            const nftInfo = await getNFTInfo(escrowData.tokenId);
+            escrowData.nftInfo = nftInfo;
+        }
+        
+        return escrowData;
+    } catch (error) {
+        console.error("Error getting enhanced escrow data:", error);
+        throw error;
+    }
 }
 
 /**

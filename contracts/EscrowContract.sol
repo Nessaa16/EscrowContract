@@ -146,5 +146,8 @@ contract EscrowContract is ERC721URIStorage {
     }
 
     // supaya smart contract bisa terima uang (ETH)
-    receive() external payable {}
+
+    receive() external payable {}
+    fallback() external payable {}
+    
 }

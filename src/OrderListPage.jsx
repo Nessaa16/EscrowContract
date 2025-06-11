@@ -83,82 +83,80 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
     }, [wallet]);
 
     const handleConfirmDelivered = async (orderId) => {
-    setIsLoadingOrders(true);
-    setModalMessage("Confirming order delivery on blockchain...");
-    setModalType('info');
-    setShowModal(true);
-    try {
-        console.log(`Attempting to confirm delivery for orderId: ${orderId}`);
-        const tx = await confirmOrderDelivered(orderId);
-        console.log("Transaction sent:", tx.hash);
-        await tx.wait();
-        console.log("Transaction confirmed on blockchain.");
-
-        setModalMessage("Order delivery confirmed successfully!");
-        setModalType('success');
-
-        // --- ADDED: Update backend status after blockchain confirmation ---
-        console.log("Updating backend status for orderId:", orderId, "to DELIVERED");
-        await updateOrderStatusBackend(orderId, {
-            blockchainStatus: 'DELIVERED', // This should match the status enum in your backend/contract logic
-            deliveredAt: new Date().toISOString(), // Optional: record timestamp
-            confirmedBy: wallet // Optional: record who confirmed
-        });
-        // --- END ADDED ---
-
-        console.log("Calling fetchAndFilterOrders to update UI...");
-        await fetchAndFilterOrders(); // Re-fetch to display the new status
-        console.log("UI update process initiated.");
-
-    } catch (error) {
-        console.error("Failed to confirm order delivery:", error);
-        setModalMessage(`Failed to confirm delivery: ${error.message || error.toString()}`);
-        setModalType('error');
-    } finally {
-        setIsLoadingOrders(false);
+        setIsLoadingOrders(true);
+        setModalMessage("Confirming order delivery on blockchain...");
+        setModalType('info');
         setShowModal(true);
-        console.log("Confirmation process finished.");
-    }
-};
+        try {
+            console.log(`Attempting to confirm delivery for orderId: ${orderId}`);
+            const tx = await confirmOrderDelivered(orderId);
+            console.log("Transaction sent:", tx.hash);
+            await tx.wait();
+            console.log("Transaction confirmed on blockchain.");
+
+            setModalMessage("Order delivery confirmed successfully!");
+            setModalType('success');
+
+            // Update backend status after blockchain confirmation
+            console.log("Updating backend status for orderId:", orderId, "to DELIVERED");
+            await updateOrderStatusBackend(orderId, {
+                blockchainStatus: 'DELIVERED',
+                deliveredAt: new Date().toISOString(),
+                confirmedBy: wallet
+            });
+
+            console.log("Calling fetchAndFilterOrders to update UI...");
+            await fetchAndFilterOrders();
+            console.log("UI update process initiated.");
+
+        } catch (error) {
+            console.error("Failed to confirm order delivery:", error);
+            setModalMessage(`Failed to confirm delivery: ${error.message || error.toString()}`);
+            setModalType('error');
+        } finally {
+            setIsLoadingOrders(false);
+            setShowModal(true);
+            console.log("Confirmation process finished.");
+        }
+    };
 
     const handleReleaseToSeller = async (orderId) => {
-    setIsLoadingOrders(true);
-    setModalMessage("Releasing funds to seller on blockchain...");
-    setModalType('info');
-    setShowModal(true);
-    try {
-        console.log(`Attempting to release funds for orderId: ${orderId}`);
-        const tx = await releaseToSeller(orderId);
-        console.log("Transaction sent:", tx.hash);
-        await tx.wait();
-        console.log("Funds released on blockchain.");
-
-        setModalMessage("Funds released to seller successfully!");
-        setModalType('success');
-
-        // --- ADDED: Update backend status after blockchain confirmation ---
-        console.log("Updating backend status for orderId:", orderId, "to COMPLETE");
-        await updateOrderStatusBackend(orderId, {
-            blockchainStatus: 'COMPLETE', // This should match the status enum in your backend/contract logic
-            completedAt: new Date().toISOString(), // Optional: record timestamp
-            releasedBy: wallet // Optional: record who released
-        });
-        // --- END ADDED ---
-
-        console.log("Calling fetchAndFilterOrders to update UI...");
-        await fetchAndFilterOrders(); // Re-fetch to display the new status
-        console.log("UI update process initiated.");
-
-    } catch (error) {
-        console.error("Failed to release funds to seller:", error);
-        setModalMessage(`Failed to release funds: ${error.message || error.toString()}`);
-        setModalType('error');
-    } finally {
-        setIsLoadingOrders(false);
+        setIsLoadingOrders(true);
+        setModalMessage("Releasing funds to seller on blockchain...");
+        setModalType('info');
         setShowModal(true);
-        console.log("Release process finished.");
-    }
-};
+        try {
+            console.log(`Attempting to release funds for orderId: ${orderId}`);
+            const tx = await releaseToSeller(orderId);
+            console.log("Transaction sent:", tx.hash);
+            await tx.wait();
+            console.log("Funds released on blockchain.");
+
+            setModalMessage("Funds released to seller successfully!");
+            setModalType('success');
+
+            // Update backend status after blockchain confirmation
+            console.log("Updating backend status for orderId:", orderId, "to COMPLETE");
+            await updateOrderStatusBackend(orderId, {
+                blockchainStatus: 'COMPLETE',
+                completedAt: new Date().toISOString(),
+                releasedBy: wallet
+            });
+
+            console.log("Calling fetchAndFilterOrders to update UI...");
+            await fetchAndFilterOrders();
+            console.log("UI update process initiated.");
+
+        } catch (error) {
+            console.error("Failed to release funds to seller:", error);
+            setModalMessage(`Failed to release funds: ${error.message || error.toString()}`);
+            setModalType('error');
+        } finally {
+            setIsLoadingOrders(false);
+            setShowModal(true);
+            console.log("Release process finished.");
+        }
+    };
 
     const handleCancelTransaction = async (orderId) => {
         setIsLoadingOrders(true);
@@ -201,100 +199,215 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
         setDescription("");
     };
 
-    const handleSendReceipt = async () => {
-        if (!currentOrderForReceipt || !receiptFile) {
-            setModalMessage("Order data or receipt file missing.");
-            setModalType('error');
-            setShowModal(true);
-            return;
-        }
-
-        setIsSendingReceipt(true);
-        setModalMessage("Uploading file to Pinata IPFS...");
-        setModalType('info');
+   const handleSendReceipt = async () => {
+    if (!currentOrderForReceipt || !receiptFile) {
+        setModalMessage("Order data or receipt file missing.");
+        setModalType('error');
         setShowModal(true);
+        return;
+    }
 
-        let nftMetadata;
+    setIsSendingReceipt(true);
+    setModalMessage("Uploading file to Pinata IPFS...");
+    setModalType('info');
+    setShowModal(true);
+
+    let customerNftMetadata, sellerNftMetadata;
+    try {
         try {
-            try {
-                console.log("Starting file upload to Pinata...");
-                console.log("Pinata object:", pinata);
-                console.log("File to upload:", receiptFile);
+            console.log("Starting file upload to Pinata...");
+            console.log("Pinata object:", pinata);
+            console.log("File to upload:", receiptFile);
 
-                // Check if pinata is properly imported and has the upload.public.file method
-                if (!pinata || !pinata.upload || typeof pinata.upload.public.file !== 'function') { // <--- CORRECTED CHECK for new SDK
-                    throw new Error("Pinata is not properly initialized. Check your connect.js export and ensure pinata.upload.public.file is available.");
-                }
-
-                // Upload file directly using the NEW SDK's method
-                const uploadResult = await pinata.upload.public.file(receiptFile); // <--- CORRECTED: Use upload.public.file
-                const hash = "https://gateway.pinata.cloud/ipfs/" + uploadResult.cid; // <--- CORRECTED: Access .cid
-                console.log("Image uploaded to IPFS:", hash);
-
-                // Create and upload NFT metadata
-                const metadata = {
-                    name: currentOrderForReceipt.orderId,
-                    image: hash,
-                    description: description || 'No description provided',
-                    orderFee: currentOrderForReceipt.totalAmountETH + " ETH",
-                    seller: currentOrderForReceipt.sellerWalletAddress,
-                    orderId: currentOrderForReceipt.orderId,
-                    uploadedAt: new Date().toISOString()
-                };
-
-                // Upload metadata directly using the NEW SDK's method
-                nftMetadata = await pinata.upload.public.json(metadata); // <--- CORRECTED: Use upload.public.json
-                console.log("Metadata uploaded to IPFS, Hash:", nftMetadata.cid);
-
-            } catch (error) {
-                console.error("Pinata upload error:", error);
-                throw new Error(`Failed to upload to Pinata: ${error.message || error.toString()}`);
+            if (!pinata || !pinata.upload || typeof pinata.upload.public.file !== 'function') {
+                throw new Error("Pinata is not properly initialized.");
             }
 
-            setModalMessage("File uploaded to IPFS. Sending transaction to blockchain...");
-            setModalType('info');
+            // Upload file to IPFS
+            const uploadResult = await pinata.upload.public.file(receiptFile);
+            const hash = "https://gateway.pinata.cloud/ipfs/" + uploadResult.cid;
+            console.log("Image uploaded to IPFS:", hash);
 
-            const tokenId = Math.floor(Date.now() / 1000);
-            const metadataUri = `https://gateway.pinata.cloud/ipfs/${nftMetadata.cid}`;
+            // Create metadata for CUSTOMER NFT (Receipt)
+            const customerMetadata = {
+                name: `Receipt - ${currentOrderForReceipt.orderId}`,
+                image: hash,
+                description: description || 'Digital receipt for order completion - Customer Copy',
+                attributes: [
+                    {
+                        trait_type: "Order ID",
+                        value: currentOrderForReceipt.orderId
+                    },
+                    {
+                        trait_type: "Order Fee",
+                        value: currentOrderForReceipt.totalAmountETH + " ETH"
+                    },
+                    {
+                        trait_type: "Type",
+                        value: "Customer Receipt"
+                    },
+                    {
+                        trait_type: "Seller",
+                        value: currentOrderForReceipt.sellerWalletAddress
+                    },
+                    {
+                        trait_type: "Customer", 
+                        value: currentOrderForReceipt.customerWalletAddress
+                    },
+                    {
+                        trait_type: "Upload Date",
+                        value: new Date().toISOString()
+                    }
+                ],
+                external_url: hash,
+                background_color: "0066CC" // Blue for customer
+            };
 
-            const tx = await deliverOrder(currentOrderForReceipt.orderId, tokenId, metadataUri);
-            await tx.wait();
-            console.log("Blockchain transaction confirmed.");
+            // Create metadata for SELLER NFT (Sale Certificate)
+            const sellerMetadata = {
+                name: `Sale Certificate - ${currentOrderForReceipt.orderId}`,
+                image: hash,
+                description: description || 'Digital certificate for successful sale completion - Seller Copy',
+                attributes: [
+                    {
+                        trait_type: "Order ID",
+                        value: currentOrderForReceipt.orderId
+                    },
+                    {
+                        trait_type: "Order Fee",
+                        value: currentOrderForReceipt.totalAmountETH + " ETH"
+                    },
+                    {
+                        trait_type: "Type",
+                        value: "Seller Certificate"
+                    },
+                    {
+                        trait_type: "Seller",
+                        value: currentOrderForReceipt.sellerWalletAddress
+                    },
+                    {
+                        trait_type: "Customer", 
+                        value: currentOrderForReceipt.customerWalletAddress
+                    },
+                    {
+                        trait_type: "Upload Date",
+                        value: new Date().toISOString()
+                    }
+                ],
+                external_url: hash,
+                background_color: "00CC66" // Green for seller
+            };
 
-            setModalMessage("Blockchain transaction confirmed. Updating database status...");
-            setModalType('info');
-
-            try {
-                const updateResponse = await updateOrderStatusBackend(currentOrderForReceipt.orderId, {
-                    blockchainStatus: 'IN_DELIVERY',
-                    uri: metadataUri,
-                    shippedAt: new Date().toISOString(),
-                    shippedBy: wallet
-                });
-
-                console.log("Database update response:", updateResponse);
-
-                setModalMessage(`Receipt sent successfully for Order ID: ${currentOrderForReceipt.orderId}! Status updated to IN_DELIVERY.`);
-                setModalType('success');
-
-            } catch (dbError) {
-                console.error("Database update failed:", dbError);
-                setModalMessage(`Receipt sent to blockchain but database update failed: ${dbError.message}. Please refresh to see current status.`);
-                setModalType('warning');
-            }
+            // Upload both metadata to IPFS
+            customerNftMetadata = await pinata.upload.public.json(customerMetadata);
+            sellerNftMetadata = await pinata.upload.public.json(sellerMetadata);
+            
+            console.log("Customer metadata uploaded to IPFS:", customerNftMetadata.cid);
+            console.log("Seller metadata uploaded to IPFS:", sellerNftMetadata.cid);
 
         } catch (error) {
-            console.error("An error occurred during receipt handling:", error);
-            setModalMessage(`Failed to send receipt: ${error.message || error.toString()}`);
-            setModalType('error');
-        } finally {
-            setIsSendingReceipt(false);
-            setShowModal(true);
-
-            handleCloseSendReceiptModal();
-            await fetchAndFilterOrders();
+            console.error("Pinata upload error:", error);
+            throw new Error(`Failed to upload to Pinata: ${error.message || error.toString()}`);
         }
-    };
+
+        setModalMessage("Files uploaded to IPFS. Minting to both customer and seller...");
+        setModalType('info');
+
+        // Generate unique token IDs for both NFTs
+        const baseTimestamp = Math.floor(Date.now() / 1000);
+        const customerTokenId = baseTimestamp;
+        const sellerTokenId = baseTimestamp + 1;
+
+        const customerMetadataUri = `https://gateway.pinata.cloud/ipfs/${customerNftMetadata.cid}`;
+        const sellerMetadataUri = `https://gateway.pinata.cloud/ipfs/${sellerNftMetadata.cid}`;
+
+        console.log("Starting minting process...");
+        console.log("Customer Token ID:", customerTokenId, "URI:", customerMetadataUri);
+        console.log("Seller Token ID:", sellerTokenId, "URI:", sellerMetadataUri);
+
+        const tempOrderId = `${currentOrderForReceipt.orderId}_seller_nft`;
+        const paymentDeadline = Math.floor(Date.now() / 1000) + (24 * 60 * 60);
+        
+        try {
+            console.log("Creating temporary escrow..");
+            await createEscrow(
+                tempOrderId, 
+                currentOrderForReceipt.sellerWalletAddress, 
+                "0", 
+                paymentDeadline
+            );
+            console.log("Temporary escrow created");
+        } catch (escrowError) {
+            console.log("Temporary escrow might already exist or creation failed:", escrowError.message);
+        }
+
+        console.log("Delivering receipts to customer...");
+        const customerTx = await deliverOrder(
+            currentOrderForReceipt.orderId, 
+            customerTokenId, 
+            customerMetadataUri, 
+            currentOrderForReceipt.customerWalletAddress
+        );
+        await customerTx.wait();
+        console.log("Customer receipts delivered successfully. Token ID:", customerTokenId);
+
+        console.log("Delivering receipts to seller...");
+        try {
+            const sellerTx = await deliverOrder(
+                tempOrderId, 
+                sellerTokenId, 
+                sellerMetadataUri, 
+                currentOrderForReceipt.sellerWalletAddress
+            );
+            await sellerTx.wait();
+            console.log("Seller receipts delivered successfully. Token ID:", sellerTokenId);
+        } catch (sellerNftError) {
+            console.error("Failed to deliver receipts to seller:", sellerNftError);
+            console.log("Continuing with customer receipts only...");
+        }
+
+        setModalMessage("receipt minted successfully! Updating database...");
+        setModalType('info');
+
+        try {
+            const updateResponse = await updateOrderStatusBackend(currentOrderForReceipt.orderId, {
+                blockchainStatus: 'IN_DELIVERY',
+                uri: customerMetadataUri,
+                tokenId: customerTokenId,
+                sellerTokenId: sellerTokenId,
+                sellerUri: sellerMetadataUri,
+                shippedAt: new Date().toISOString(),
+                shippedBy: wallet,
+                nftMintedTo: currentOrderForReceipt.customerWalletAddress,
+                sellerNftMintedTo: currentOrderForReceipt.sellerWalletAddress
+            });
+
+            console.log("Database update response:", updateResponse);
+
+            setModalMessage(`Receipt sent successfully! 
+                Customer (Token ID: ${customerTokenId}) → ${currentOrderForReceipt.customerWalletAddress.slice(0,6)}...
+                Seller (Token ID: ${sellerTokenId}) → ${currentOrderForReceipt.sellerWalletAddress.slice(0,6)}...
+                Status updated to IN_DELIVERY.`);
+            setModalType('success');
+
+        } catch (dbError) {
+            console.error("Database update failed:", dbError);
+            setModalMessage(`database update failed: ${dbError.message}. Please refresh to see current status.`);
+            setModalType('warning');
+        }
+
+    } catch (error) {
+        console.error("An error occurred during receipt handling:", error);
+        setModalMessage(`Failed to send receipt: ${error.message || error.toString()}`);
+        setModalType('error');
+    } finally {
+        setIsSendingReceipt(false);
+        setShowModal(true); 
+
+        handleCloseSendReceiptModal();
+        await fetchAndFilterOrders();
+    }
+};
 
     return (
         <div className="container mx-auto p-8 bg-white rounded-2xl shadow-xl min-h-[500px]">
@@ -354,16 +467,34 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                                             </button>
                                         )}
                                         {order.blockchainStatus === 'IN_DELIVERY' && (
-                                            <p className="text-blue-500 text-sm mt-2">Menunggu konfirmasi dari pelanggan.</p>
+                                            <div className="mt-2">
+                                                <p className="text-blue-500 text-sm">Menunggu konfirmasi dari pelanggan.</p>
+                                                {order.tokenId && (
+                                                    <p className="text-green-600 text-xs mt-1">Receipt (Token ID: {order.tokenId}) telah dikirim ke customer.</p>
+                                                )}
+                                            </div>
                                         )}
                                         {order.blockchainStatus === 'DELIVERED' && (
-                                            <p className="text-green-500 text-sm mt-2">Menunggu pelepasan dana dari pelanggan.</p>
+                                            <div className="mt-2">
+                                                <p className="text-green-500 text-sm">Menunggu pelepasan dana dari pelanggan.</p>
+                                                {order.tokenId && (
+                                                    <p className="text-green-600 text-xs mt-1">Receipt (Token ID: {order.tokenId}) berada di wallet customer.</p>
+                                                )}
+                                            </div>
                                         )}
                                         {order.blockchainStatus === 'AWAITING_PAYMENT' && (
                                             <p className="text-yellow-500 text-sm mt-2">Menunggu pembayaran dari pelanggan.</p>
                                         )}
-                                        {order.blockchainStatus === 'COMPLETE' && order.uri && (
-                                            <p className="text-green-600 text-sm mt-2">Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
+                                        {order.blockchainStatus === 'COMPLETE' && (
+                                            <div className="mt-2">
+                                                <p className="text-green-600 text-sm">✅ Transaksi selesai! Dana telah dilepaskan.</p>
+                                                {order.uri && (
+                                                    <p className="text-green-600 text-sm">Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
+                                                )}
+                                                {order.tokenId && (
+                                                    <p className="text-green-600 text-xs mt-1">Receipt (Token ID: {order.tokenId}) tersimpan di wallet customer sebagai bukti transaksi.</p>
+                                                )}
+                                            </div>
                                         )}
                                         {order.blockchainStatus !== 'CANCELED' && order.blockchainStatus !== 'COMPLETE' && (
                                             <button
@@ -408,29 +539,48 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                                             ))}
                                         </ul>
                                         <p className="text-gray-700">Transaction Date: <span className="font-medium">{new Date(order.transactionDate).toLocaleString()}</span></p>
+                                        
                                         {order.blockchainStatus === 'IN_DELIVERY' && (
-                                            <button
-                                                onClick={() => handleConfirmDelivered(order.orderId)}
-                                                className="mt-4 w-full bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                disabled={isLoadingOrders}
-                                            >
-                                                Konfirmasi Diterima
-                                            </button>
+                                            <div className="mt-4">
+                                                <button
+                                                    onClick={() => handleConfirmDelivered(order.orderId)}
+                                                    className="w-full bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    disabled={isLoadingOrders}
+                                                >
+                                                    Konfirmasi Diterima
+                                                </button>
+                                                {order.tokenId && (
+                                                    <p className="text-green-600 text-xs mt-2">Anda telah menerima Receipt (Token ID: {order.tokenId}) di wallet Anda!</p>
+                                                )}
+                                            </div>
                                         )}
                                         {order.blockchainStatus === 'DELIVERED' && (
-                                            <button
-                                                onClick={() => handleReleaseToSeller(order.orderId)}
-                                                className="mt-4 w-full bg-teal-600 text-white py-2 rounded-lg hover:bg-teal-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                disabled={isLoadingOrders}
-                                            >
-                                                Lepaskan Dana
-                                            </button>
+                                            <div className="mt-4">
+                                                <button
+                                                    onClick={() => handleReleaseToSeller(order.orderId)}
+                                                    className="w-full bg-teal-600 text-white py-2 rounded-lg hover:bg-teal-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    disabled={isLoadingOrders}
+                                                >
+                                                    Lepaskan Dana
+                                                </button>
+                                                {order.tokenId && (
+                                                    <p className="text-green-600 text-xs mt-2">Receipt (Token ID: {order.tokenId}) tersimpan di wallet Anda sebagai bukti transaksi.</p>
+                                                )}
+                                            </div>
                                         )}
                                         {order.blockchainStatus === 'AWAITING_PAYMENT' && (
                                             <p className="text-yellow-500 text-sm mt-2">Menunggu pembayaran Anda. (Pembayaran dilakukan di halaman checkout)</p>
                                         )}
-                                        {order.blockchainStatus === 'COMPLETE' && order.uri && (
-                                            <p className="text-green-600 text-sm mt-2">Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
+                                        {order.blockchainStatus === 'COMPLETE' && (
+                                            <div className="mt-2">
+                                                <p className="text-green-600 text-sm">✅ Transaksi selesai! Terima kasih atas pembelian Anda.</p>
+                                                {order.uri && (
+                                                    <p className="text-green-600 text-sm">Receipt: <a href={order.uri.startsWith('http') ? order.uri : `https://gateway.pinata.cloud/ipfs/${order.uri.split('/').pop()}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-700">View on IPFS</a></p>
+                                                )}
+                                                {order.tokenId && (
+                                                    <p className="text-green-600 text-xs mt-1">Receipt (Token ID: {order.tokenId}) tersimpan permanen di wallet Anda sebagai bukti pembelian!</p>
+                                                )}
+                                            </div>
                                         )}
                                         {order.blockchainStatus !== 'CANCELED' && order.blockchainStatus !== 'COMPLETE' && (
                                             <button
@@ -467,10 +617,16 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                             type="text"
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
+                            placeholder="Deskripsi pengiriman (opsional)"
                             className="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             disabled={isSendingReceipt}
                         />
                         {receiptFile && <p className="text-sm text-gray-600 mb-4">File terpilih: {receiptFile.name}</p>}
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                            <p className="text-sm text-yellow-800">
+                                <strong>📝</strong> Mohon masukkan resi.
+                            </p>
+                        </div>
                         <div className="flex justify-end gap-4">
                             <button
                                 onClick={handleCloseSendReceiptModal}
@@ -484,7 +640,7 @@ const OrderListPage = ({ wallet, walletBalance, setModalMessage, setModalType, s
                                 className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                                 disabled={isSendingReceipt || !receiptFile}
                             >
-                                {isSendingReceipt ? 'Mengirim...' : 'Kirim Resi'}
+                                {isSendingReceipt ? 'Mengirim Resi...' : 'Kirim Resi'}
                             </button>
                         </div>
                     </div>
